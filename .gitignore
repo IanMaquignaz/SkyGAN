@@ -5,3 +5,5 @@ src/stylegan3/_screenshots
 core
 skygan.o*
 skygan.e*
+out
+*.so
