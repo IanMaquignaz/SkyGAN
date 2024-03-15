@@ -7,3 +7,4 @@ skygan.o*
 skygan.e*
 out
 *.so
+data_*

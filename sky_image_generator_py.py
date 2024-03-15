@@ -5,225 +5,96 @@ A non-jupiter notebook version of the sky_image_generator_py.ipynb file.
 # Standard Library
 import os
 import math
+import datetime as dt
+from pathlib import Path
 
 # Machine Vision
 import cv2
+import pandas as pd
 import numpy as np
 
-# Junk
-import pandas as pd
-from matplotlib import pyplot as plt
-
-
 # Custom
-import sky_image_generator
+from envmap import EnvironmentMap
+from hdrtools.sunutils import  sunPosition_pySolar_zenithAzimuth
+from hdrtools.sunutils import  sunPosition_pySolar_XYZ
 
-coordinate_img = np.array(sky_image_generator.project_cloudplane_coordinates(128)).reshape(3,128,128)
-coordinate_img = np.moveaxis(coordinate_img, 0, 2)
-
-layer = coordinate_img[:,:,0]
-layer.min(), layer.max()
-
-plt.imshow(coordinate_img)
+# import sky_image_generator
+import PSM_2021 as sky_image_generator
 
 
-
-# load the shooting metadata
-data = pd.read_csv("light_cloud_cover.csv")
-shoot, photo_index = '2019-06-24_0504_prague_chodska_21_rooftop', '0418' # done2
-
-os.environ["OPENCV_IO_ENABLE_OPENEXR"]="1"
-
-fname = '/projects/SkyGAN/clouds_fisheye/processed/'+shoot+'/1K_EXR/IMG_'+photo_index+'_hdr.exr'
-real_img = cv2.imread(fname, flags = cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
-
-view_multiplier = 8
-plt.imshow(cv2.cvtColor(real_img*view_multiplier, cv2.COLOR_BGR2RGB))
+# Globals
+shape = 512
+azimuth = 0. # Globally set
+elevation = 0. # Globally set
+real_img = np.zeros((shape, shape, 3))
+model_img = np.zeros((shape, shape, 3))
+rgb_mask = np.zeros((shape, shape, 3), dtype=bool)
 
 
-# look up image's elevation and azimuth in the shooting metadata
-data_line = data[data['img_fname'] == fname]
-assert len(data_line) == 1
-elevation, azimuth = data_line['img_elevation'].iloc[0], data_line['img_azimuth'].iloc[0]
-
-# verify (visually) the generated sky image looks similar
-model_img = sky_image_generator.generate_image(
-    1024, #resolution
-    elevation /180*np.pi, # elevation
-    math.fmod(360 + 270 - azimuth, 360) /180*np.pi, # azimuth
-    100, # visibility (in km)
-    0.1 # ground albedo
-)
-plt.imshow(cv2.cvtColor(model_img/(2**8)*view_multiplier, cv2.COLOR_BGR2RGB))
-
-
-# masking out irrelevant areas (close to the Sun and outside the projected skydome)
-#t_min = 1e-10
-#t_min = 0.003
-#t_max = 0.04
-t_min, t_max = np.percentile(real_img, [30, 99])
-print(t_min, t_max)
-mask_thresh = cv2.inRange(real_img, (t_min, t_min, t_min), (t_max, t_max, t_max))
-mask_thresh = mask_thresh.astype("bool")
-plt.imshow(mask_thresh)
-
-
-# https://gist.github.com/Quasimondo/c3590226c924a06b276d606f4f189639
-def RGB2YUV(rgb):
-    m = np.array([[ 0.29900, -0.16874,  0.50000],
-                 [0.58700, -0.33126, -0.41869],
-                 [ 0.11400, 0.50000, -0.08131]])
-
-    yuv = np.dot(rgb,m)
-    yuv[:,:,1:]+=128.0
-    return yuv
-
-
-#real_img_y = cv2.cvtColor(real_img*10000, cv2.COLOR_BGR2YUV)[..., 0]
-real_img_y = RGB2YUV(cv2.cvtColor(real_img, cv2.COLOR_BGR2RGB))[..., 0]
-#print(np.percentile(real_img, [0,5,25,50,75,95,100]))
-real_img_y = np.clip(real_img_y, *np.percentile(real_img, [5, 95]))
-#print(np.percentile(real_img, [0,5,25,50,75,95,100]))
-real_img_y = real_img_y - real_img_y.min()
-#print(np.percentile(real_img, [0,5,25,50,75,95,100]))
-real_img_y = real_img_y / real_img_y.max()
-#print(np.percentile(real_img, [0,5,25,50,75,95,100]))
-#print(real_img_y.shape, real_img_y.min(), real_img_y.mean(), real_img_y.max())
-plt.imshow(real_img_y)
-#print(np.percentile(real_img, [0,5,25,50,75,95,100]))
-
-
-t_min, t_max = np.percentile(real_img_y, [30, 95])
-print(t_min, t_max)
-mask_thresh = cv2.inRange(real_img_y, t_min, t_max)
-mask_thresh = mask_thresh.astype("bool")
-plt.imshow(mask_thresh)
-
-
-mask_name = fname.split('/')[5] + '-' + fname.split('/')[7].replace('.exr', '')
-mask_fname_base = 'masks/' + mask_name + '/'
-if not os.path.isdir(mask_fname_base):
-    os.mkdir(mask_fname_base)
-
-
-# laod and use a manually-painted mask
-mask_thresh_read = cv2.imread(mask_fname_base + 'mask.png') / 255
-mask_thresh_read = mask_thresh_read.astype("bool")
-mask_thresh_read.mean()
-mask_thresh_read = mask_thresh_read[:, :, 0] # use only the "red" channel
-mask_thresh_read.shape
-mask_thresh_read = mask_thresh_read > 0.5
-plt.imshow(mask_thresh_read)
-mask_thresh = mask_thresh_read
-
-rgb_mask = np.repeat(mask_thresh[:, :, np.newaxis], 3, axis=2)
-
-plt.imshow(cv2.cvtColor(real_img*rgb_mask*view_multiplier, cv2.COLOR_BGR2RGB))
-
-
-######################
-# Optimize Sky Model #
-######################
-import scipy.optimize
-
-visibility_min = 20
-visibility_max = 131.8
-
-def make_visibility(v): # [0,1] -> [visibility_min, visibility_max]
+def make_visibility(
+    v,
+    visibility_min=20,
+    visibility_max=131.8
+):
+    # [0,1] -> [visibility_min, visibility_max]
     return visibility_min + (visibility_max - visibility_min) * v
 
-make_visibility(0.5301181736571103)
-
-
-def penalize_out_of_range(value, minimum=0, maximum=1):
-    if value < minimum:
-        return minimum - value
-    if value > 1:
-        return value - maximum
-    return 0
-
-# "exposure": find a multiplier of the generated sky image that minimizes the difference to the real image
 
 def generate_sky_image_exposure(opt_params):
+    # "exposure":
+    # find a multiplier of the generated sky image
+    # that minimizes the difference to the real image
     exposure = opt_params[0]
     return model_img * np.power(2, exposure)
+
 
 def extra_loss_exposure(opt_params):
     return 0
 
-optimise_exposure = {
-    #                  e
-    'initial_values': [-8],
-    'generate_sky_image': generate_sky_image_exposure,
-    'extra_loss': extra_loss_exposure
-}
 
-# "exposure, visibility and ground_albedo": find an exposure and model parameters (visibility and ground albedo)
+def prepend_opt_params_and_call(prefix, what_to_call):
+    def bla(opt_params):
+        return what_to_call(np.concatenate((prefix, opt_params), axis=None))
+    return bla
 
-resolution = 1024
-
-def generate_sky_image_exposure_visibility_groundalbedo(opt_params):
-    exposure, visibility, ground_albedo = opt_params[0], make_visibility(opt_params[1]), opt_params[2]
-
-    sun_phi = math.fmod(360 + 270 - azimuth, 360) /180*np.pi # azimuth
-    sun_theta = elevation /180*np.pi # elevation
-
-    print('generate_sky_image(', [exposure, visibility, ground_albedo], ')')
-
-    model_img = sky_image_generator.generate_image(
-        1024, #resolution
-        sun_theta, # elevation
-        sun_phi, # azimuth
-        visibility, # visibility (in km)
-        ground_albedo # ground albedo
-    )
-    return model_img * np.power(2, exposure)
 
 def extra_loss_exposure_visibility_groundalbedo(opt_params):
     exposure, visibility01, ground_albedo = opt_params[0], opt_params[1], opt_params[2]
     extra = 0
+
+    def penalize_out_of_range(value, minimum=0, maximum=1):
+        if value < minimum:
+            return minimum - value
+        if value > 1:
+            return value - maximum
+        return 0
+
     # constrain parameters to their limits parameters (HACK. maybe using a constrained optimizer would be more suitable)
     extra += penalize_out_of_range(visibility01)
     extra += penalize_out_of_range(ground_albedo)
-
     print('extra_loss', extra)
     return extra
-
-optimise_exposure_visibility_groundalbedo = {
-    #                   exposure, visibility, ground_albedo
-    #'initial_values': [       -8,        0.5,           0.5], # unused
-    'generate_sky_image': generate_sky_image_exposure_visibility_groundalbedo,
-    'extra_loss': extra_loss_exposure_visibility_groundalbedo
-}
-
-
-def L1(generated_img, real_img):
-    #plt.imshow(cv2.cvtColor(generated_img*5, cv2.COLOR_BGR2RGB))
-    multiply = 10
-    diff = generated_img - real_img
-    cv2.imwrite('last_diff.png', diff * 255 * multiply)
-    diff_masked = np.abs(diff)*rgb_mask
-    cv2.imwrite('last_diff_masked.png', diff_masked * 255 * multiply)
-    return (diff_masked).mean()
-
-compute_error_metric = L1
-
 
 
 def loss(opt_params):
     global best_value, best_params
+
+    def L1(generated_img, real_img):
+        diff = generated_img - real_img
+        diff_masked = np.abs(diff)
+        diff_masked = diff_masked *rgb_mask
+        return diff_masked.mean()
+
     opt_params_log.append(opt_params)
     print('loss(', opt_params, ')')
 
     generated_img = optimise_settings['generate_sky_image'](opt_params)
-    #print('mean', generated_img.mean())
-    assert(generated_img.shape == real_img.shape)
 
-    error_value = compute_error_metric(generated_img, real_img)
+    assert(generated_img.shape == real_img.shape)
+    error_value = L1(generated_img, real_img)
     print('error_value', error_value)
 
     loss_value = optimise_settings['extra_loss'](opt_params) + error_value
-
     opt_loss_log.append(loss_value)
 
     # save the parameters of the best iteration
@@ -234,15 +105,416 @@ def loss(opt_params):
     return loss_value
 
 
+# BT.601 RGB to YUV
+# NOT VALID FOR HDR IMAGES! Intended for [0-255] LDR
+# See Pg.45-47:  https://www.emva.org/wp-content/uploads/GenICam_PFNC_2_3.pdf
+# https://gist.github.com/Quasimondo/c3590226c924a06b276d606f4f189639
+def RGB2YUV(rgb):
+    m = np.array([[ 0.29900, -0.16874,  0.50000],
+                [0.58700, -0.33126, -0.41869],
+                [ 0.11400, 0.50000, -0.08131]])
+    yuv = np.dot(rgb,m)
+    yuv[:,:,1:]+=128.0
+    return yuv
+
+
+def generate_clearSky(self, opt_params):
+    exposure = opt_params[0]
+    visibility = self.make_visibility(opt_params[1])
+    ground_albedo = opt_params[2]
+
+    print('generate_sky_image(', [exposure, visibility, ground_albedo], ')')
+    sun_phi = math.fmod(360 + 270 - azimuth, 360) /180*np.pi # azimuth
+    sun_theta = elevation /180*np.pi # elevation
+
+    # Generate the clearSky
+    model_img = sky_image_generator.generate_image(
+        shape, # resolution
+        sun_theta, # elevation
+        sun_phi, # azimuth
+        visibility, # visibility (in km)
+        ground_albedo # ground albedo
+    )
+    return model_img * np.power(2, exposure)
+
+
+def create_mask():
+    # masking out irrelevant areas (close to the Sun and outside the projected skydome)
+    t_min, t_max = np.percentile(real_img, [30, 99])
+    mask_thresh = cv2.inRange(
+        real_img,
+        (t_min, t_min, t_min),
+        (t_max, t_max, t_max)
+    )
+    mask_thresh = mask_thresh.astype(bool)
+    real_img_y = RGB2YUV(
+        cv2.cvtColor(real_img, cv2.COLOR_BGR2RGB)
+    )[..., 0]
+    real_img_y = np.clip(real_img_y, *np.percentile(real_img, [5, 95]))
+    real_img_y = real_img_y - real_img_y.min()
+    real_img_y = real_img_y / real_img_y.max()
+
+    t_min, t_max = np.percentile(real_img_y, [30, 95])
+    mask_thresh = cv2.inRange(real_img_y, t_min, t_max)
+    mask_thresh = mask_thresh.astype(bool)
+
+    # load and use a manually-painted mask
+    # mask_thresh_read = cv2.imread(mask_fname_base + 'mask.png') / 255
+    mask_thresh_read = mask_thresh_read.astype(bool)
+    mask_thresh_read = mask_thresh_read[:, :, 0] # use only the "red" channel
+    mask_thresh_read = mask_thresh_read > 0.5
+    mask_thresh = mask_thresh_read
+    rgb_mask = np.repeat(mask_thresh[:, :, np.newaxis], 3, axis=2)
+    return rgb_mask
+
+
+os.environ["OPENCV_IO_ENABLE_OPENEXR"]="1"
+def load_image(path):
+    # load the real image
+    if isinstance(path, Path):
+        path = path.as_posix()
+    real_img = cv2.imread(path, flags = cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
+    real_img = cv2.cvtColor(real_img, cv2.COLOR_BGR2RGB)
+    return real_img
+
+
+def load_HDRDB_envmap(path, TEST=True):
+
+    real_img = load_image(path)
+
+    if real_img.shape[0] != real_img.shape[1]:
+        # Assume latlong
+        e = EnvironmentMap(real_img, 'latlong').convertTo('skyangular')
+    else:
+        # Assume skyangular
+        e = EnvironmentMap(real_img, 'skyangular')
+    real_img = e.data
+    zenith, azimuth = get_coordinate_solar(path)
+    if TEST:
+        # Add a dot to demonstrate the position of the sun
+        # x,y,z = get_coordinate_solar(path, xyz=True)
+        x,y,z = azimuthZenith2xyz(azimuth,zenith)
+        offset = 5
+        c,r = e.world2pixel(x,y,z)
+        real_img[
+            r-offset:r+offset,
+            c-offset:c+offset, :] = 0
+        real_img[
+            r-offset:r+offset,
+            c-offset:c+offset, 0] = 200000
+        real_img[r,c] = 0
+
+        # ClearSky
+        model_img = sky_image_generator.generate_image(
+            real_img.shape[0], #resolution
+            (np.pi/2)-zenith, # elevation
+            azimuth+np.pi, # azimuth
+            100, # visibility (in km)
+            0.1 # ground albedo
+        )
+        model_img = cv2.cvtColor(model_img.astype(np.float32), cv2.COLOR_BGR2RGB)
+        p_img = Path('data_HDRDB') / (path.stem + '_clearSky' + path.suffix)
+        save_image(p_img, model_img)
+
+    # Done
+    return real_img, zenith, azimuth
+
+
+def azimuthZenith2xyz(
+    azimuth,
+    zenith=None,
+    elevation=None
+):
+    # Convert Zenith to elevation
+    if zenith is not None:
+        elevation = (np.pi/2) - zenith
+    else:
+        assert elevation is not None
+
+    '''
+    Please note:
+    zenith angle = 90degrees - elevation angle
+    azimuth angle = north-based azimuth angles require offset (+90deg) and inversion (*-1) to measure clockwise
+    thus, azimuth = (pi/2) - azimuth
+    '''
+    # Fix azimuth orientation
+    azimuth = azimuth - (np.pi/2)
+
+    # Convert to XYZ
+    x = np.cos(elevation) * np.sin(azimuth)
+    y = np.sin(elevation) # Y axis is up
+    z = np.cos(elevation) * np.cos(azimuth)
+
+    # Done
+    return x,y,z
+
+
+# Parameters for OpenCV imwrite
+flags_imwrite_EXR_imwrite_float32 = [
+    cv2.IMWRITE_EXR_TYPE,
+    cv2.IMWRITE_EXR_TYPE_FLOAT # float32
+]
+def save_image(path, image):
+    # load the real image
+    if isinstance(path, Path):
+        path = path.as_posix()
+    image = cv2.cvtColor(image.astype(np.float32), cv2.COLOR_RGB2BGR)
+    path = Path(path)
+    filename = (path.parent / (path.stem + '.exr')).as_posix()
+    cv2.imwrite(filename, image.astype(np.float32), flags_imwrite_EXR_imwrite_float32)
+
+
+# HDRDB
+# DANGER! Timezone is not CANADA/MONTREAL, EST, DST or UTC-5
+# HDRDB uses Atlantic Standard Time (AST) is UTC-4
+LOCALITY = {
+    'timezone': dt.timezone(dt.timedelta(hours=-4)),
+    'latitude': 46.778969,
+    'longitude': -71.274914,
+    'elevation': 125
+}
+
+
+def get_coordinate_solar(timestamp, xyz=False):
+    ''' Get solar position in world coordinates from timestamp '''
+
+    if isinstance(timestamp, Path):
+        timestamp = timestamp.as_posix()
+
+    if isinstance(timestamp, str):
+        timestamp = dateTime_fromPathStem(timestamp)
+
+    if not xyz:
+        zenith, azimuth = sunPosition_pySolar_zenithAzimuth(
+            LOCALITY['latitude'],
+            LOCALITY['longitude'],
+            timestamp,
+            LOCALITY['elevation']
+        )
+        return zenith, azimuth
+
+    x,y,z = sunPosition_pySolar_XYZ(
+        LOCALITY['latitude'],
+        LOCALITY['longitude'],
+        timestamp,
+        LOCALITY['elevation']
+    )
+    return x,y,z
+
+
+def dateTime_fromPathStem(filePath:str, tz=None):
+    ''' Get the datetime from file name '''
+
+    if tz is None:
+        tz = LOCALITY['timezone']
+
+    # Get the stem
+    stem = Path(filePath).stem.split("_")
+    year = int(stem[0][0:4])
+    month = int(stem[0][4:6])
+    day = int(stem[0][6:8])
+    hour = int(stem[1][0:2])
+    minute = int(stem[1][2:4])
+    second = int(stem[1][4:6])
+
+    return dt.datetime(
+        year, month, day,
+        hour, minute, second,
+        tzinfo=LOCALITY['timezone']
+    )
+
+
+# load the shooting metadata
+path_SkyGAN_data = Path("/home/iamaq/storage/SkyGAN")
+path_SkyGAN_metadata = path_SkyGAN_data / "auto_processed_20230405_1727.csv"
+SkyGAN_data = pd.read_csv(path_SkyGAN_metadata.as_posix())
+def load_SkyGAN_envmap(idx:int=None, filename:str=None, TEST=True):
+    # look up image's elevation and azimuth in the shooting metadata
+    if filename is not None:
+        data_line = SkyGAN_data[SkyGAN_data['img_fname'] == filename]
+    elif idx is not None:
+        data_line = SkyGAN_data.iloc[idx]
+    # print(data_line, len(data_line))
+
+    path_img = path_SkyGAN_data / data_line['img_fname']
+    elevation_deg = data_line['sun_elevation']
+    azimuth_deg   = data_line['sun_azimuth']
+    azimuth = math.fmod(360+270 - azimuth_deg, 360) /180*np.pi # azimuth
+    elevation = elevation_deg /180*np.pi # elevation
+
+    # Load the image
+    real_img = load_image(path_img)
+    if TEST:
+        e = EnvironmentMap(real_img, 'skyangular')
+        azimuth_ = math.fmod(180+270 - azimuth_deg, 360) /180*np.pi # azimuth
+        x,y,z = azimuthZenith2xyz(azimuth_, elevation=elevation)
+
+        offset = 5
+        c,r = e.world2pixel(x,y,z)
+        real_img[
+            r-offset:r+offset,
+            c-offset:c+offset, :] = 0
+        real_img[
+            r-offset:r+offset,
+            c-offset:c+offset, 0] = 200000
+        real_img[r,c] = 0
+
+        p_img = Path('data_SkyGAN') / path_img.name
+        save_image(p_img, real_img)
+
+        # ClearSky
+        model_img = sky_image_generator.generate_image(
+            real_img.shape[0], #resolution
+            elevation, # elevation
+            azimuth, # azimuth
+            100, # visibility (in km)
+            0.1 # ground albedo
+        )
+        model_img = cv2.cvtColor(model_img.astype(np.float32), cv2.COLOR_BGR2RGB)
+        p_img = Path('data_SkyGAN') / (path_img.stem + '_clearSky' + path_img.suffix)
+        save_image(p_img, model_img)
+
+
+def test_load_SkyGAN():
+    print('---')
+    load_SkyGAN_envmap(idx=0)
+    print('---')
+    load_SkyGAN_envmap(idx=10)
+    print('---')
+    load_SkyGAN_envmap(idx=100)
+    print('---')
+    load_SkyGAN_envmap(idx=1000)
+    print('---')
+    load_SkyGAN_envmap(idx=1001)
+    print('---')
+    load_SkyGAN_envmap(idx=1002)
+    print('---')
+    load_SkyGAN_envmap(idx=1003)
+    print('---')
+    exit()
+
+
+def test_azimuth():
+    count = 13
+    for i in np.linspace(0, 360, count):
+        model_img = sky_image_generator.generate_image(
+            1024, #resolution
+            # elevation /180*np.pi, # elevation
+            15 /180*np.pi, # elevation
+            # math.fmod(360 + 270 - azimuth, 360) /180*np.pi, # azimuth
+            math.fmod(360 + 270 - i, 360) /180*np.pi, # azimuth
+            100, # visibility (in km)
+            0.1 # ground albedo
+        )
+        model_img = cv2.cvtColor(model_img.astype(np.float32), cv2.COLOR_BGR2RGB)
+        p_img = Path('data_SkyGAN') / ('clearSky_azimuth_'+str(int(i)).zfill(3)+'.exr')
+        save_image(p_img, model_img)
+
+
+def test_elevation():
+    count = 7
+    for i in np.linspace(0, 90, count):
+        model_img = sky_image_generator.generate_image(
+            1024, #resolution
+            # elevation /180*np.pi, # elevation
+            i /180*np.pi, # elevation
+            # math.fmod(360 + 270 - azimuth, 360) /180*np.pi, # azimuth
+            math.fmod(360 + 270 - 0, 360) /180*np.pi, # azimuth
+            100, # visibility (in km)
+            0.1 # ground albedo
+        )
+        p_img = Path('data_SkyGAN') / ('clearSky_elevation_'+str(int(i)).zfill(3)+'.exr')
+        model_img = cv2.cvtColor(model_img.astype(np.float32), cv2.COLOR_BGR2RGB)
+        save_image(p_img, model_img)
+
+
+######################
+# Optimize Sky Model #
+######################
+
+import scipy.optimize
+
+paths = [
+    '20141005_125753_envmap.exr',
+    '20141005_170952_envmap.exr',
+    '20160607_125219_envmap.exr',
+    '20160610_185510_envmap.exr',
+    '20160621_121606_envmap.exr',
+    '20141005_154552_envmap.exr',
+    '20160607_084600_envmap.exr',
+    '20160610_090634_envmap.exr',
+    '20160620_103154_envmap.exr',
+    '20160621_202836_envmap.exr',
+]
+
+for p in paths:
+    print(p)
+
+    # Load the image
+    p = 'data_HDRDB'/ Path(p)
+    real_img, zenith, azimuth = load_HDRDB_envmap(p, TEST=True)
+    shape = real_img.shape[0]
+
+    p_sa = p.parent / (p.stem + '_skyAngular' + p.suffix)
+    save_image(p_sa,real_img)
+
+    # # Tweak
+    # elevation = np.pi/2 - zenith # Globally set
+    # azimuth = (azimuth/np.pi)*180 # Globally set
+    # azimuth = (math.fmod(360 + 270 - azimuth, 360) /180)*np.pi # azimuth
+
+
+
+
+    # print(
+    #     p.stem, real_img.shape,
+    #     'zenith', np.rad2deg(zenith),
+    #     'azimuth', np.rad2deg(azimuth),
+    #     'elevation', np.rad2deg(elevation)
+    # )
+
+
+    # # Generate the clear sky
+    # model_img = sky_image_generator.generate_image(
+    #     real_img.shape[0], #resolution
+    #     elevation, # elevation
+    #     azimuth, # azimuth
+    #     100, # visibility (in km)
+    #     0.1 # ground albedo
+    # )
+    # model_img = cv2.cvtColor(model_img.astype(np.float32), cv2.COLOR_BGR2RGB)
+    # p_CS = p.parent / (p.stem + '_clearSky' + p.suffix)
+    # save_image(p_CS,model_img)
+
+
+    # rgb_mask = np.zeros((shape, shape, 3), dtype=bool)
+
+
+
+exit()
+
+
 best_value, best_params = float('inf'), None # remember the best encountered parameters, useful in case we leave the minimum
 opt_loss_log, opt_params_log = [], []
 
+# Set objective (passed by reference via optimize_settings)
+optimise_exposure = {
+    #                  e
+    'initial_values': [-8],
+    'generate_sky_image': generate_sky_image_exposure,
+    'extra_loss': extra_loss_exposure
+}
 optimise_settings = optimise_exposure
+
+
 optim_res = scipy.optimize.minimize(
     loss,
     np.array(optimise_settings['initial_values']),
-    options={'eps': 1e-04, 'maxiter': 15#, 'gtol': 1e-07
-            }
+    options={
+        'eps': 1e-04,
+        'maxiter': 15,
+        #'gtol': 1e-07,
+    }
 )
 opt_params_log_exposure = opt_params_log
 best_params_exposure = best_params
@@ -254,19 +526,16 @@ assert optim_res.success
 best_value, best_params = float('inf'), None # remember the best encountered parameters, useful in case we leave the minimum
 opt_loss_log, opt_params_log = [], []
 
-def prepend_opt_params_and_call(prefix, what_to_call):
-    def bla(opt_params):
-        return what_to_call(np.concatenate((prefix, opt_params), axis=None))
-    return bla
 
+# Set objective (passed by reference via optimize_settings)
 optimise_visibility_groundalbedo = {
     #                  visibility, ground_albedo
     'initial_values': [       0.5,           0.5],
-    'generate_sky_image': prepend_opt_params_and_call(best_params_exposure, generate_sky_image_exposure_visibility_groundalbedo),
+    'generate_sky_image': prepend_opt_params_and_call(best_params_exposure, generate_clearSky),
     'extra_loss': prepend_opt_params_and_call(best_params_exposure, extra_loss_exposure_visibility_groundalbedo)
 }
-
 optimise_settings = optimise_visibility_groundalbedo
+
 optim_res = scipy.optimize.minimize(
     loss,
     np.array(optimise_settings['initial_values']), # replace the initial exposure with the found one
@@ -285,7 +554,14 @@ assert optim_res.success
 best_value, best_params = float('inf'), None # remember the best encountered parameters, useful in case we leave the minimum
 opt_loss_log, opt_params_log = [], []
 
+optimise_exposure_visibility_groundalbedo = {
+    #                   exposure, visibility, ground_albedo
+    #'initial_values': [       -8,        0.5,           0.5], # unused
+    'generate_sky_image': generate_clearSky,
+    'extra_loss': extra_loss_exposure_visibility_groundalbedo
+}
 optimise_settings = optimise_exposure_visibility_groundalbedo
+
 optim_res = scipy.optimize.minimize(
     loss,
     np.array(np.concatenate((best_params_exposure, best_params_visibility_groundalbedo), axis=None)), # replace the initial exposure with the found one
@@ -297,80 +573,39 @@ optim_res = scipy.optimize.minimize(
 opt_params_log_exposure_visibility_groundalbedo = opt_params_log
 best_params_exposure_visibility_groundalbedo = best_params
 
-#opt_timeshift = None
-opt_x = optim_res.x
 
 print(optim_res)
-
-
 print('best:', best_params)
 print('visibility:', make_visibility(best_params[1]), 'km')
 
 
-#used_params = opt_x
-used_params = best_params
 
-with open(mask_fname_base + 'used_params.txt', 'w') as f:
-    f.write(repr(used_params.tolist()))
-    f.write('\n')
-    f.write(repr(opt_loss_log))
+# ######################
+# # Secondary Channels #
+# ######################
+# import secondary_channels
+# secondary_channels.init(resolution)
 
-# real photograph
-#plt.imshow(cv2.cvtColor(real_img*view_multiplier, cv2.COLOR_BGR2RGB))
-plt.imshow(cv2.cvtColor((real_img*view_multiplier)**(1/2.2), cv2.COLOR_BGR2RGB))
-#cv2.imwrite(mask_fname_base + 'real_image.png', real_img*view_multiplier*255)
-cv2.imwrite(mask_fname_base + 'real_image.png', (real_img*view_multiplier)**(1/2.2)*255)
+# polar_distance = secondary_channels.polar_distance(secondary_channels.phi, secondary_channels.theta, sun_phi, sun_theta)
+# plt.imshow(polar_distance)
 
+# logdistance_to_clouds = np.log(secondary_channels.distance_to_clouds)
+# plt.imshow(logdistance_to_clouds)
 
-generate_sky_image=generate_sky_image_exposure_visibility_groundalbedo
+# np.expand_dims(polar_distance, 2).shape
+# np.expand_dims(logdistance_to_clouds, 2).shape
+# generated.dtype
 
-# generated sky-dome image
-plt.imshow(cv2.cvtColor((generate_sky_image(used_params)*view_multiplier)**(1/2.2), cv2.COLOR_BGR2RGB))
-#cv2.imwrite(mask_fname_base + 'generated_image.png', generate_sky_image(used_params)*view_multiplier*255)
-cv2.imwrite(mask_fname_base + 'generated_image.png', (generate_sky_image(used_params)*view_multiplier)**(1/2.2)*255)
-
-# difference image
-plt.imshow(cv2.cvtColor((generate_sky_image(used_params)-real_img)*view_multiplier, cv2.COLOR_BGR2RGB))
-
-# difference image, masked
-plt.imshow(cv2.cvtColor((generate_sky_image(used_params)-real_img)*rgb_mask*view_multiplier, cv2.COLOR_BGR2RGB))
-#cv2.imwrite('masked_diff.exr', (generate_sky_image(used_params)-real_img)*rgb_mask)
-
-# The same masked difference image, just "amplified" (simulated ~16x longer exposure)
-plt.imshow(cv2.cvtColor((generate_sky_image(used_params)-real_img)*rgb_mask*30*view_multiplier, cv2.COLOR_BGR2RGB))
-
-generated = cv2.cvtColor(generate_sky_image(used_params)*view_multiplier, cv2.COLOR_BGR2RGB)
-#generated = generated[:,:,0]
-print(generated.shape)
-plt.imshow(generated)
+# # add the secondary channels to the generated clear-sky image
+# generated_with_secondary_channels = np.concatenate([
+#     generated,
+#     np.expand_dims(polar_distance, 2),
+#     np.expand_dims(logdistance_to_clouds, 2)
+# ], axis=2)
 
 
-######################
-# Secondary Channels #
-######################
-import secondary_channels
-secondary_channels.init(resolution)
-
-polar_distance = secondary_channels.polar_distance(secondary_channels.phi, secondary_channels.theta, sun_phi, sun_theta)
-plt.imshow(polar_distance)
-
-logdistance_to_clouds = np.log(secondary_channels.distance_to_clouds)
-plt.imshow(logdistance_to_clouds)
-
-np.expand_dims(polar_distance, 2).shape
-np.expand_dims(logdistance_to_clouds, 2).shape
-generated.dtype
-
-# add the secondary channels to the generated clear-sky image
-generated_with_secondary_channels = np.concatenate([
-    generated,
-    np.expand_dims(polar_distance, 2),
-    np.expand_dims(logdistance_to_clouds, 2)
-], axis=2)
-
-
-def bla(generated_with_secondary_channels):
-    generated_with_secondary_channels = generated_with_secondary_channels[:,:,4]
-    print(generated_with_secondary_channels.shape, generated_with_secondary_channels.dtype)
-    plt.imshow(generated_with_secondary_channels)
-bla(generated_with_secondary_channels)
+# def bla(generated_with_secondary_channels):
+#     generated_with_secondary_channels = generated_with_secondary_channels[:,:,4]
+#     print(generated_with_secondary_channels.shape, generated_with_secondary_channels.dtype)
+#     plt.imshow(generated_with_secondary_channels)
+# bla(generated_with_secondary_channels)
