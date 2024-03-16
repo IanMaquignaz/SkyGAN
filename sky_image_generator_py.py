@@ -23,6 +23,7 @@ import PSM_2021 as sky_image_generator
 
 
 # Globals
+global shape, azimuth, elevation, real_img, model_img, rgb_mask
 shape = 512
 azimuth = 0. # Globally set
 elevation = 0. # Globally set
@@ -45,7 +46,7 @@ def generate_sky_image_exposure(opt_params):
     # find a multiplier of the generated sky image
     # that minimizes the difference to the real image
     exposure = opt_params[0]
-    return model_img * np.power(2, exposure)
+    return model_img.copy() * np.power(2, exposure)
 
 
 def extra_loss_exposure(opt_params):
@@ -90,7 +91,12 @@ def loss(opt_params):
 
     generated_img = optimise_settings['generate_sky_image'](opt_params)
 
-    assert(generated_img.shape == real_img.shape)
+    assert \
+        (generated_img.shape[0] == real_img.shape[0]) and \
+        (generated_img.shape[1] == real_img.shape[1]) and \
+        (generated_img.shape[0] == real_img.shape[1]), \
+        f'generated_img.shape({generated_img.shape}) != real_img.shape({real_img.shape})'
+
     error_value = L1(generated_img, real_img)
     print('error_value', error_value)
 
@@ -118,23 +124,39 @@ def RGB2YUV(rgb):
     return yuv
 
 
-def generate_clearSky(self, opt_params):
+def generate_clearSky_SkyGAN(opt_params):
     exposure = opt_params[0]
-    visibility = self.make_visibility(opt_params[1])
+    visibility = make_visibility(opt_params[1])
     ground_albedo = opt_params[2]
 
-    print('generate_sky_image(', [exposure, visibility, ground_albedo], ')')
-    sun_phi = math.fmod(360 + 270 - azimuth, 360) /180*np.pi # azimuth
-    sun_theta = elevation /180*np.pi # elevation
+    print('generate_sky_image_SkyGAN(', [exposure, visibility, ground_albedo], ')')
 
     # Generate the clearSky
     model_img = sky_image_generator.generate_image(
-        shape, # resolution
-        sun_theta, # elevation
-        sun_phi, # azimuth
+        shape, #resolution
+        elevation, # elevation
+        azimuth, # azimuth
         visibility, # visibility (in km)
         ground_albedo # ground albedo
     )
+    model_img = cv2.cvtColor(model_img, cv2.COLOR_BGR2RGB)
+    return model_img * np.power(2, exposure)
+
+
+def generate_clearSky_HDRDB(opt_params):
+    exposure = opt_params[0]
+    visibility = make_visibility(opt_params[1])
+    ground_albedo = opt_params[2]
+
+    print('generate_sky_image_HDRDB(', [exposure, visibility, ground_albedo], ')')
+    model_img = sky_image_generator.generate_image(
+        shape, #resolution
+        (np.pi/2)-zenith, # elevation
+        azimuth+np.pi, # azimuth
+        visibility, # visibility (in km)
+        ground_albedo # ground albedo
+    )
+    model_img = cv2.cvtColor(model_img, cv2.COLOR_BGR2RGB)
     return model_img * np.power(2, exposure)
 
 
@@ -178,8 +200,9 @@ def load_image(path):
     return real_img
 
 
-def load_HDRDB_envmap(path, TEST=True):
+def load_HDRDB_envmap(path, TEST=False):
 
+    # Load the image
     real_img = load_image(path)
 
     if real_img.shape[0] != real_img.shape[1]:
@@ -189,13 +212,17 @@ def load_HDRDB_envmap(path, TEST=True):
         # Assume skyangular
         e = EnvironmentMap(real_img, 'skyangular')
     real_img = e.data
+
+    # Get solar position
     zenith, azimuth = get_coordinate_solar(path)
+    # Add a dot to demonstrate the position of the sun
+    # x,y,z = get_coordinate_solar(path, xyz=True)
+    x,y,z = azimuthZenith2xyz(azimuth,zenith)
+    offset = 5
+    c,r = e.world2pixel(x,y,z)
+
     if TEST:
-        # Add a dot to demonstrate the position of the sun
-        # x,y,z = get_coordinate_solar(path, xyz=True)
-        x,y,z = azimuthZenith2xyz(azimuth,zenith)
-        offset = 5
-        c,r = e.world2pixel(x,y,z)
+        real_img = real_img.copy()
         real_img[
             r-offset:r+offset,
             c-offset:c+offset, :] = 0
@@ -204,20 +231,20 @@ def load_HDRDB_envmap(path, TEST=True):
             c-offset:c+offset, 0] = 200000
         real_img[r,c] = 0
 
-        # ClearSky
-        model_img = sky_image_generator.generate_image(
-            real_img.shape[0], #resolution
-            (np.pi/2)-zenith, # elevation
-            azimuth+np.pi, # azimuth
-            100, # visibility (in km)
-            0.1 # ground albedo
-        )
-        model_img = cv2.cvtColor(model_img.astype(np.float32), cv2.COLOR_BGR2RGB)
-        p_img = Path('data_HDRDB') / (path.stem + '_clearSky' + path.suffix)
-        save_image(p_img, model_img)
+    # ClearSky
+    model_img = sky_image_generator.generate_image(
+        real_img.shape[0], #resolution
+        (np.pi/2)-zenith, # elevation
+        azimuth+np.pi, # azimuth
+        100, # visibility (in km)
+        0.1 # ground albedo
+    )
+    model_img = cv2.cvtColor(model_img.astype(np.float32), cv2.COLOR_BGR2RGB)
+    # p_img = Path('data_HDRDB') / (path.stem + '_clearSky' + path.suffix)
+    # save_image(p_img, model_img)
 
     # Done
-    return real_img, zenith, azimuth
+    return real_img, zenith, azimuth, model_img
 
 
 def azimuthZenith2xyz(
@@ -373,6 +400,7 @@ def load_SkyGAN_envmap(idx:int=None, filename:str=None, TEST=True):
         model_img = cv2.cvtColor(model_img.astype(np.float32), cv2.COLOR_BGR2RGB)
         p_img = Path('data_SkyGAN') / (path_img.stem + '_clearSky' + path_img.suffix)
         save_image(p_img, model_img)
+    return real_img, elevation, azimuth
 
 
 def test_load_SkyGAN():
@@ -452,137 +480,131 @@ for p in paths:
 
     # Load the image
     p = 'data_HDRDB'/ Path(p)
-    real_img, zenith, azimuth = load_HDRDB_envmap(p, TEST=True)
+
+    real_img, zenith, azimuth, model_img = load_HDRDB_envmap(p)
     shape = real_img.shape[0]
 
     p_sa = p.parent / (p.stem + '_skyAngular' + p.suffix)
     save_image(p_sa,real_img)
 
-    # # Tweak
-    # elevation = np.pi/2 - zenith # Globally set
-    # azimuth = (azimuth/np.pi)*180 # Globally set
-    # azimuth = (math.fmod(360 + 270 - azimuth, 360) /180)*np.pi # azimuth
+    rgb_mask = np.ones((shape, shape, 3), dtype=bool)
 
 
+    ############
+    # Exposure #
+    ############
+    best_value, best_params = float('inf'), None
+    opt_loss_log, opt_params_log = [], []
 
-
-    # print(
-    #     p.stem, real_img.shape,
-    #     'zenith', np.rad2deg(zenith),
-    #     'azimuth', np.rad2deg(azimuth),
-    #     'elevation', np.rad2deg(elevation)
-    # )
-
-
-    # # Generate the clear sky
-    # model_img = sky_image_generator.generate_image(
-    #     real_img.shape[0], #resolution
-    #     elevation, # elevation
-    #     azimuth, # azimuth
-    #     100, # visibility (in km)
-    #     0.1 # ground albedo
-    # )
-    # model_img = cv2.cvtColor(model_img.astype(np.float32), cv2.COLOR_BGR2RGB)
-    # p_CS = p.parent / (p.stem + '_clearSky' + p.suffix)
-    # save_image(p_CS,model_img)
-
-
-    # rgb_mask = np.zeros((shape, shape, 3), dtype=bool)
-
-
-
-exit()
-
-
-best_value, best_params = float('inf'), None # remember the best encountered parameters, useful in case we leave the minimum
-opt_loss_log, opt_params_log = [], []
-
-# Set objective (passed by reference via optimize_settings)
-optimise_exposure = {
-    #                  e
-    'initial_values': [-8],
-    'generate_sky_image': generate_sky_image_exposure,
-    'extra_loss': extra_loss_exposure
-}
-optimise_settings = optimise_exposure
-
-
-optim_res = scipy.optimize.minimize(
-    loss,
-    np.array(optimise_settings['initial_values']),
-    options={
-        'eps': 1e-04,
-        'maxiter': 15,
-        #'gtol': 1e-07,
+    # Set objective (passed by reference via optimize_settings)
+    optimise_exposure = {
+        #                  e
+        'initial_values': [-8],
+        'generate_sky_image': generate_sky_image_exposure,
+        'extra_loss': extra_loss_exposure
     }
-)
-opt_params_log_exposure = opt_params_log
-best_params_exposure = best_params
-print(optim_res)
-assert optim_res.success
-
-# Optimise the visibility distance and ground albedo
-
-best_value, best_params = float('inf'), None # remember the best encountered parameters, useful in case we leave the minimum
-opt_loss_log, opt_params_log = [], []
+    optimise_settings = optimise_exposure
 
 
-# Set objective (passed by reference via optimize_settings)
-optimise_visibility_groundalbedo = {
-    #                  visibility, ground_albedo
-    'initial_values': [       0.5,           0.5],
-    'generate_sky_image': prepend_opt_params_and_call(best_params_exposure, generate_clearSky),
-    'extra_loss': prepend_opt_params_and_call(best_params_exposure, extra_loss_exposure_visibility_groundalbedo)
-}
-optimise_settings = optimise_visibility_groundalbedo
+    optim_res = scipy.optimize.minimize(
+        loss,
+        np.array(optimise_settings['initial_values']),
+        options={
+            'eps': 1e-04,
+            'maxiter': 30,
+            #'gtol': 1e-07,
+        }
+    )
+    opt_params_log_exposure = opt_params_log
+    best_params_exposure = best_params
+    print(optim_res)
+    print('best:', best_params)
+    assert optim_res.success
 
-optim_res = scipy.optimize.minimize(
-    loss,
-    np.array(optimise_settings['initial_values']), # replace the initial exposure with the found one
-    method='L-BFGS-B',
-    bounds=[(0,1), (0,1)],
-    options={'eps': 1e-04, 'maxiter': 20, 'pgtol': 1e-07}
-)
-opt_params_log_visibility_groundalbedo = opt_params_log
-best_params_visibility_groundalbedo = best_params
-print(optim_res)
-assert optim_res.success
-
-
-# Optimise (fine-tune) all the params at the same time: exposure, visibility distance and ground albedo
-
-best_value, best_params = float('inf'), None # remember the best encountered parameters, useful in case we leave the minimum
-opt_loss_log, opt_params_log = [], []
-
-optimise_exposure_visibility_groundalbedo = {
-    #                   exposure, visibility, ground_albedo
-    #'initial_values': [       -8,        0.5,           0.5], # unused
-    'generate_sky_image': generate_clearSky,
-    'extra_loss': extra_loss_exposure_visibility_groundalbedo
-}
-optimise_settings = optimise_exposure_visibility_groundalbedo
-
-optim_res = scipy.optimize.minimize(
-    loss,
-    np.array(np.concatenate((best_params_exposure, best_params_visibility_groundalbedo), axis=None)), # replace the initial exposure with the found one
-    method='L-BFGS-B',
-    bounds=[[None, None], (0,1), (0,1)],
-    options={'eps': 1e-04, 'maxiter': 25}
-)
-
-opt_params_log_exposure_visibility_groundalbedo = opt_params_log
-best_params_exposure_visibility_groundalbedo = best_params
+    # Save intermediary result
+    model_img = model_img * np.power(2, best_params)
+    p_img = Path('data_HDRDB') / (p.stem + '_clearSky' + p.suffix)
+    save_image(p_img, model_img)
 
 
-print(optim_res)
-print('best:', best_params)
-print('visibility:', make_visibility(best_params[1]), 'km')
+    ################################
+    # visibility and ground albedo #
+    ################################
+    best_value, best_params = float('inf'), None # remember the best encountered parameters, useful in case we leave the minimum
+    opt_loss_log, opt_params_log = [], []
+
+    # Set objective (passed by reference via optimize_settings)
+    optimise_visibility_groundalbedo = {
+        #                  visibility, ground_albedo
+        'initial_values': [       0.5,           0.5],
+        'generate_sky_image': prepend_opt_params_and_call(best_params_exposure, generate_clearSky_HDRDB),
+        'extra_loss': prepend_opt_params_and_call(best_params_exposure, extra_loss_exposure_visibility_groundalbedo)
+    }
+    optimise_settings = optimise_visibility_groundalbedo
+
+    optim_res = scipy.optimize.minimize(
+        loss,
+        np.array(optimise_settings['initial_values']), # replace the initial exposure with the found one
+        method='L-BFGS-B',
+        bounds=[(0,1), (0,1)],
+        options={'eps': 1e-04, 'maxiter': 20, 'pgtol': 1e-07}
+    )
+    opt_params_log_visibility_groundalbedo = opt_params_log
+    best_params_visibility_groundalbedo = best_params
+    print(optim_res)
+    print('best:', best_params)
+    assert optim_res.success
+
+    model_img = optimise_settings['generate_sky_image'](best_params)
+    p_img = Path('data_HDRDB') / (p.stem + '_clearSky' + p.suffix)
+    save_image(p_img, model_img)
 
 
+    ##########################################
+    # Exposure, visibility and ground albedo #
+    ##########################################
+    # Optimise (fine-tune) all the params at the same time: exposure, visibility distance and ground albedo
+    best_value, best_params = float('inf'), None # remember the best encountered parameters, useful in case we leave the minimum
+    opt_loss_log, opt_params_log = [], []
 
-# ######################
-# # Secondary Channels #
-# ######################
+    optimise_exposure_visibility_groundalbedo = {
+        #                   exposure, visibility, ground_albedo
+        #'initial_values': [       -8,        0.5,           0.5], # unused
+        'generate_sky_image': generate_clearSky_HDRDB,
+        'extra_loss': extra_loss_exposure_visibility_groundalbedo
+    }
+    optimise_settings = optimise_exposure_visibility_groundalbedo
+
+    optim_res = scipy.optimize.minimize(
+        loss,
+        np.array(np.concatenate((best_params_exposure, best_params_visibility_groundalbedo), axis=None)), # replace the initial exposure with the found one
+        method='L-BFGS-B',
+        bounds=[[None, None], (0,1), (0,1)],
+        options={'eps': 1e-04, 'maxiter': 25}
+    )
+
+    opt_params_log_exposure_visibility_groundalbedo = opt_params_log
+    best_params_exposure_visibility_groundalbedo = best_params
+
+
+    print(optim_res)
+    print('best:', best_params)
+    print('visibility:', make_visibility(best_params[1]), 'km')
+    model_img = optimise_settings['generate_sky_image'](best_params)
+    p_img = Path('data_HDRDB') / (p.stem + '_clearSky_all' + p.suffix)
+    save_image(p_img, model_img)
+
+
+    with open('params.txt', 'a') as f:
+        f.write(p.name+' ')
+        f.write(repr(best_params.tolist()))
+        f.write('\n')
+        # f.write(repr(opt_loss_log))
+
+
+######################
+# Secondary Channels #
+######################
 # import secondary_channels
 # secondary_channels.init(resolution)
 
