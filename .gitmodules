@@ -1,0 +1,6 @@
+[submodule "Parametric_SkyModels"]
+	path = libs/Parametric_SkyModels
+	url = git@github.com:IanMaquignaz/Parametric_SkyModels.git
+[submodule "skymangler"]
+	path = libs/skymangler
+	url = git@github.com:IanMaquignaz/skymangler.git

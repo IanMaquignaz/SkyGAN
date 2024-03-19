@@ -28,7 +28,8 @@ try:
 except ImportError:
     pyspng = None
 
-import sky_image_generator
+from HDRDB import load_HDRDB_envmap
+import PSM_2021 as sky_image_generator
 import secondary_channels
 import training.utils
 
@@ -183,7 +184,7 @@ class ImageFolderDataset(Dataset):
     def __init__(self,
         path,                   # Path to directory or zip or csv.
         resolution      = None, # Ensure specific resolution, None = highest available, setting a resolution forces resizing (one-time preprocessing)
-        normalize_azimuth=False,# Rotate the image so that the sun azimuth is 180 deg (one-time preprocessing) 
+        normalize_azimuth=False,# Rotate the image so that the sun azimuth is 180 deg (one-time preprocessing)
         **super_kwargs,         # Additional arguments for the Dataset base class.
     ):
         self._path = path
@@ -201,7 +202,7 @@ class ImageFolderDataset(Dataset):
             self._type = 'csv'
             csv = pandas.read_csv(self._path)
             csv = csv.sort_values(by=['img_fname']) # TODO maybe sort by time
-            
+
             if csv['img_fname'][0][0] == '/':
                 self._all_fnames = csv['img_fname'].to_list()
             else:
@@ -216,7 +217,7 @@ class ImageFolderDataset(Dataset):
             #   manual_EV_shift   ... manually selected per-shoot (NOT per-image) exposures for roughly equal brightness (a dict in fit_exposure.ipynb)
             if 'manual_EV_shift' in csv.columns:
                 print('reading manual_EV_shift from csv')
-                self._all_multipliers = np.array(csv['manual_EV_shift'].to_list()) 
+                self._all_multipliers = np.array(csv['manual_EV_shift'].to_list())
             else:
                 # newer auto_processed dataset has consistent exposures, no per-shoot correction necessary
                 print('using zero manual_EV_shift')
@@ -271,7 +272,7 @@ class ImageFolderDataset(Dataset):
 
     def __getstate__(self):
         return dict(super().__getstate__(), _zipfile=None)
-    
+
     @staticmethod
     def rotate_image(image, angle):
         # https://stackoverflow.com/a/9042907
@@ -279,7 +280,7 @@ class ImageFolderDataset(Dataset):
         rot_mat = cv2.getRotationMatrix2D(image_center, angle, 1.0)
         result = cv2.warpAffine(image, rot_mat, image.shape[1::-1], flags=cv2.INTER_LINEAR)
         return result
-    
+
     def _load_raw_image(self, raw_idx):
         fname = self._image_fnames[raw_idx]
         multiplier = self._all_multipliers[raw_idx]
@@ -297,7 +298,14 @@ class ImageFolderDataset(Dataset):
                 print('rotating', fname, 'to sun_azimuth == 180 as', rotated_fname)
                 ori_sun_azimuth = self._all_azimuths[raw_idx]
                 assert extension == 'exr' # TODO png support?
-                cv2.imwrite(rotated_fname+'.tmp.'+extension, self.rotate_image(cv2.imread(fname, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH), 180 - ori_sun_azimuth))
+                cv2.imwrite(
+                    rotated_fname+'.tmp.'+extension,
+                    self.rotate_image(
+                        # cv2.imread(fname, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH),
+                        load_HDRDB_envmap(fname),
+                        180 - ori_sun_azimuth
+                    )
+                )
                 os.rename(rotated_fname+'.tmp.'+extension, rotated_fname)
 
             fname = rotated_fname
@@ -307,14 +315,21 @@ class ImageFolderDataset(Dataset):
                 '.' + extension,
                 '.resized' + str(wanted_size) + '.' + extension
             )
-            
+
             if not os.path.isfile(resized_fname):
                 print('resizing', fname, 'to', wanted_size, 'as', resized_fname)
-                
+
                 if extension == 'exr':
                     #imageio.imwrite(resized_fname, cv2.resize(imageio.imread(fname), (wanted_size, wanted_size)))
                     #imageio.imwrite(resized_fname.replace('.exr', '.png'), (imageio.imread(fname)[:,:,:3]*255).clip(0, 255).astype(np.uint8))
-                    cv2.imwrite(resized_fname+'.tmp.'+extension, cv2.resize(cv2.imread(fname, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH), (wanted_size, wanted_size)))
+                    cv2.imwrite(
+                        resized_fname+'.tmp.'+extension,
+                        cv2.resize(
+                            # cv2.imread(fname, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH),
+                            load_HDRDB_envmap(fname),
+                            (wanted_size, wanted_size)
+                        )
+                    )
                     os.rename(resized_fname+'.tmp.'+extension, resized_fname)
                 else:
                     # TODO: this resizing is possibly incorrect - it does not work in linear colour space - we should convert it to linear, then resize, then back to the original space (assuming sRGB). But maybe it wouldn't make a noticable difference as the original was already LDR (discretised to 256 values)
@@ -328,11 +343,11 @@ class ImageFolderDataset(Dataset):
             if pyspng is not None and self._file_ext(fname) == '.png':
                 image = pyspng.load(f.read())
             elif self._file_ext(fname) == '.exr':
-                image = cv2.imread(fname, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)[:,:,::-1] # BGR -> RGB
-                
+                # image = cv2.imread(fname, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)[:,:,::-1] # BGR -> RGB
+                image = load_HDRDB_envmap(fname)
                 if image.shape[2] == 4:
                     image = image[:,:,:3] # remove alpha channel if present
-                
+
                 image *= multiplier
                 image = training.training_loop.unstretch(training.utils.log_transform(image)) # to roughly [0, 1+]
                 #image = np.clip(image, 0, 1) # DEBUG
@@ -376,24 +391,26 @@ ClearSkyDataset_mapping = diskcache.Cache(
 def generate_clear_sky_image(resolution, azimuth, elevation):
     # fixed parameters, optimized/fitted on "2019-08-10_1000_santa_cruz_villa_nuova/1K_EXR/IMG_2000_hdr.exr" using the "sky_image_generator_py.ipynb" notebook
     exposure, visibility, ground_albedo = -9.17947373e+00,  1.00012133e+02,  5.95418177e-03
-    
+
     model_img = sky_image_generator.generate_image(
         resolution,
-        elevation / 180 * np.pi, # elevation
-        math.fmod(360 + 270 - azimuth, 360) / 180 * np.pi, # azimuth
+        elevation,
+        azimuth,
+        # elevation / 180 * np.pi, # elevation
+        # math.fmod(360 + 270 - azimuth, 360) / 180 * np.pi, # azimuth
         visibility, # visibility (in km)
         ground_albedo # ground albedo
     )
-    
+
     exposure += 12 # exposure fix
 
     img = model_img * np.power(2, exposure)
     #print('img', img.min(), img.mean(), img.max())
     return img # [0, 1?]
-    
+
 def generate_clear_sky_image_and_secondary_channels(resolution, secondary_channels, azimuth, elevation):
     img = generate_clear_sky_image(resolution, azimuth, elevation) / 255
-    
+
     img = img[..., ::-1] # RGB -> BGR
 
     # add secondary/guiding channels
@@ -403,7 +420,7 @@ def generate_clear_sky_image_and_secondary_channels(resolution, secondary_channe
         img, # RGB
         np.expand_dims(polar_distance, 2),
     ], axis=2)
-    
+
     image = img_with_secondary_channels.transpose(2, 0, 1) # HWC => CHW
 
     return image
@@ -431,11 +448,11 @@ class ClearSkyDataset(Dataset):
             if normalize_azimuth:
                 azimuths *= 0
                 azimuths += 180
-            
+
             azimuths = np.fmod(azimuths, 360)
-            
+
             elevations = self.csv['sun_elevation'].to_numpy()
-            
+
             self._all_azimuths = azimuths
             self._all_elevations = elevations
         else:
@@ -448,7 +465,7 @@ class ClearSkyDataset(Dataset):
         self._image_fnames = [fname for idx, fname in enumerate(self._all_fnames) if idx in filtered_indices]
         if len(self._image_fnames) == 0:
             raise IOError('No image files found in the specified path')
-        
+
         self._image_azimuths = [azimuth for idx, azimuth in enumerate(self._all_azimuths) if idx in filtered_indices]
         self._image_elevations = [elevation for idx, elevation in enumerate(self._all_elevations) if idx in filtered_indices]
 
@@ -467,6 +484,6 @@ class ClearSkyDataset(Dataset):
         azimuth = self._image_azimuths[raw_idx]
         elevation = self._image_elevations[raw_idx]
         return generate_clear_sky_image_and_secondary_channels(self._resolution, self.secondary_channels, azimuth, elevation)
-    
+
     def _load_raw_labels(self):
         return None

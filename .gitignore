@@ -8,3 +8,4 @@ skygan.e*
 out
 *.so
 data_*
+dummy.py

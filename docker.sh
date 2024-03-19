@@ -1,4 +1,4 @@
-#!/bin/bash 
+#!/bin/bash
 CONTAINER_TAG="stylegan3"
 CONTAINER_PROJECT_NAME="ian" # Suggest
 CONTAINER_NAMETAG="$CONTAINER_PROJECT_NAME-$CONTAINER_TAG" # Suggest
@@ -36,7 +36,7 @@ while getopts $OPTIONS opt; do
             ;;
         h) # Help
             echo "Need help? There is no help. Read the code."
-            exit 0 
+            exit 0
             ;;
     esac
 done
@@ -45,7 +45,7 @@ shift $((OPTIND-1)) # remove options that have already been handled from $@
 
 if [[ $TENSORBOARD == true ]]; then
     echo "<?> STARTING TENSORBOARD <?>"
-    docker compose --project-name $CONTAINER_PROJECT_NAME exec $CONTAINER_TAG pkill -f tensorboard 
+    docker compose --project-name $CONTAINER_PROJECT_NAME exec $CONTAINER_TAG pkill -f tensorboard
     tmux new-session -s "Tensorboard" "docker compose --project-name $CONTAINER_PROJECT_NAME exec $ARG_USER $CONTAINER_TAG tensorboard --logdir /workspace/logs --bind_all --port 6006 --samples_per_plugin images=999999 --max_reload_threads 4"
     exit 0
 fi
@@ -54,11 +54,16 @@ if [[ $DOCKER_BUILD == true ]]; then
     echo "<?> STARTING DOCKER BUILD <?>"
     docker compose --project-name $CONTAINER_PROJECT_NAME --file docker-compose.yml stop
     docker compose --project-name $CONTAINER_PROJECT_NAME --file docker-compose.yml rm -f
-    docker compose --file docker-compose.yml pull 
+    docker compose --file docker-compose.yml pull
     docker compose --project-name $CONTAINER_PROJECT_NAME -f docker-compose.yml build --build-arg USER_NAME=$(whoami) --build-arg USER_ID=$(id -u) --build-arg GROUP_ID=$(id -g)
     docker compose --project-name $CONTAINER_PROJECT_NAME --file docker-compose.yml up --detach --no-recreate
 
+    # docker compose --project-name $CONTAINER_PROJECT_NAME exec -u root $CONTAINER_TAG conda update -n base conda -y
+    # docker compose --project-name $CONTAINER_PROJECT_NAME exec  -u root -w /workspace $CONTAINER_TAG conda init bash
+    # docker compose --project-name $CONTAINER_PROJECT_NAME exec  $ARG_USER -w /workspace $CONTAINER_TAG conda env create -f src/stylegan3/environment.yml
+    # docker compose --project-name $CONTAINER_PROJECT_NAME exec  $ARG_USER -w /workspace $CONTAINER_TAG conda init bash
 fi
 
 echo "<?> STARTING SHELL IN CONTAINER <?>"
+echo "To start conda env: conda activate stylegan3"
 docker compose --project-name $CONTAINER_PROJECT_NAME exec $ARG_USER $CONTAINER_TAG $COMMAND

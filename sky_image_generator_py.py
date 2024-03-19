@@ -139,7 +139,6 @@ def generate_clearSky_SkyGAN(opt_params):
         visibility, # visibility (in km)
         ground_albedo # ground albedo
     )
-    model_img = cv2.cvtColor(model_img, cv2.COLOR_BGR2RGB)
     return model_img * np.power(2, exposure)
 
 
@@ -156,11 +155,12 @@ def generate_clearSky_HDRDB(opt_params):
         visibility, # visibility (in km)
         ground_albedo # ground albedo
     )
-    model_img = cv2.cvtColor(model_img, cv2.COLOR_BGR2RGB)
     return model_img * np.power(2, exposure)
 
 
 def create_mask():
+    # TODO! Never tested!
+
     # masking out irrelevant areas (close to the Sun and outside the projected skydome)
     t_min, t_max = np.percentile(real_img, [30, 99])
     mask_thresh = cv2.inRange(
@@ -170,7 +170,7 @@ def create_mask():
     )
     mask_thresh = mask_thresh.astype(bool)
     real_img_y = RGB2YUV(
-        cv2.cvtColor(real_img, cv2.COLOR_BGR2RGB)
+        real_img
     )[..., 0]
     real_img_y = np.clip(real_img_y, *np.percentile(real_img, [5, 95]))
     real_img_y = real_img_y - real_img_y.min()
@@ -215,14 +215,14 @@ def load_HDRDB_envmap(path, TEST=False):
 
     # Get solar position
     zenith, azimuth = get_coordinate_solar(path)
-    # Add a dot to demonstrate the position of the sun
-    # x,y,z = get_coordinate_solar(path, xyz=True)
-    x,y,z = azimuthZenith2xyz(azimuth,zenith)
-    offset = 5
-    c,r = e.world2pixel(x,y,z)
 
+    # Testing
     if TEST:
-        real_img = real_img.copy()
+        # Add a dot to demonstrate the position of the sun
+        # x,y,z = get_coordinate_solar(path, xyz=True)
+        x,y,z = azimuthZenith2xyz(azimuth,zenith)
+        offset = 5
+        c,r = e.world2pixel(x,y,z)
         real_img[
             r-offset:r+offset,
             c-offset:c+offset, :] = 0
@@ -239,7 +239,6 @@ def load_HDRDB_envmap(path, TEST=False):
         100, # visibility (in km)
         0.1 # ground albedo
     )
-    model_img = cv2.cvtColor(model_img.astype(np.float32), cv2.COLOR_BGR2RGB)
     # p_img = Path('data_HDRDB') / (path.stem + '_clearSky' + path.suffix)
     # save_image(p_img, model_img)
 
@@ -282,11 +281,11 @@ flags_imwrite_EXR_imwrite_float32 = [
     cv2.IMWRITE_EXR_TYPE_FLOAT # float32
 ]
 def save_image(path, image):
-    # load the real image
-    if isinstance(path, Path):
-        path = path.as_posix()
+    # save the image
     image = cv2.cvtColor(image.astype(np.float32), cv2.COLOR_RGB2BGR)
-    path = Path(path)
+
+    if not isinstance(path, Path):
+        path = Path(path)
     filename = (path.parent / (path.stem + '.exr')).as_posix()
     cv2.imwrite(filename, image.astype(np.float32), flags_imwrite_EXR_imwrite_float32)
 
@@ -397,7 +396,6 @@ def load_SkyGAN_envmap(idx:int=None, filename:str=None, TEST=True):
             100, # visibility (in km)
             0.1 # ground albedo
         )
-        model_img = cv2.cvtColor(model_img.astype(np.float32), cv2.COLOR_BGR2RGB)
         p_img = Path('data_SkyGAN') / (path_img.stem + '_clearSky' + path_img.suffix)
         save_image(p_img, model_img)
     return real_img, elevation, azimuth
@@ -434,7 +432,6 @@ def test_azimuth():
             100, # visibility (in km)
             0.1 # ground albedo
         )
-        model_img = cv2.cvtColor(model_img.astype(np.float32), cv2.COLOR_BGR2RGB)
         p_img = Path('data_SkyGAN') / ('clearSky_azimuth_'+str(int(i)).zfill(3)+'.exr')
         save_image(p_img, model_img)
 
@@ -452,7 +449,6 @@ def test_elevation():
             0.1 # ground albedo
         )
         p_img = Path('data_SkyGAN') / ('clearSky_elevation_'+str(int(i)).zfill(3)+'.exr')
-        model_img = cv2.cvtColor(model_img.astype(np.float32), cv2.COLOR_BGR2RGB)
         save_image(p_img, model_img)
 
 
