@@ -28,7 +28,7 @@ try:
 except ImportError:
     pyspng = None
 
-from HDRDB import load_HDRDB_envmap
+from .HDRDB import load_HDRDB_envmap, save_image
 import PSM_2021 as sky_image_generator
 import secondary_channels
 import training.utils
@@ -298,15 +298,18 @@ class ImageFolderDataset(Dataset):
                 print('rotating', fname, 'to sun_azimuth == 180 as', rotated_fname)
                 ori_sun_azimuth = self._all_azimuths[raw_idx]
                 assert extension == 'exr' # TODO png support?
-                cv2.imwrite(
-                    rotated_fname+'.tmp.'+extension,
-                    self.rotate_image(
-                        # cv2.imread(fname, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH),
-                        load_HDRDB_envmap(fname),
-                        180 - ori_sun_azimuth
-                    )
-                )
-                os.rename(rotated_fname+'.tmp.'+extension, rotated_fname)
+                # cv2.imwrite(
+                #     rotated_fname+'.tmp.'+extension,
+                #     self.rotate_image(
+                #         # cv2.imread(fname, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH),
+                #         load_HDRDB_envmap(fname),
+                #         180 - ori_sun_azimuth
+                #     )
+                # )
+                image = load_HDRDB_envmap(fname)
+                image = self.rotate_image(image, 180 - ori_sun_azimuth)
+                save_image(rotated_fname, image)
+                # os.rename(rotated_fname+'.tmp.'+extension, rotated_fname)
 
             fname = rotated_fname
 
@@ -322,16 +325,20 @@ class ImageFolderDataset(Dataset):
                 if extension == 'exr':
                     #imageio.imwrite(resized_fname, cv2.resize(imageio.imread(fname), (wanted_size, wanted_size)))
                     #imageio.imwrite(resized_fname.replace('.exr', '.png'), (imageio.imread(fname)[:,:,:3]*255).clip(0, 255).astype(np.uint8))
-                    cv2.imwrite(
-                        resized_fname+'.tmp.'+extension,
-                        cv2.resize(
-                            # cv2.imread(fname, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH),
-                            load_HDRDB_envmap(fname),
-                            (wanted_size, wanted_size)
-                        )
-                    )
-                    os.rename(resized_fname+'.tmp.'+extension, resized_fname)
+                    # cv2.imwrite(
+                    #     resized_fname+'.tmp.'+extension,
+                    #     cv2.resize(
+                    #         # cv2.imread(fname, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH),
+                    #         load_HDRDB_envmap(fname),
+                    #         (wanted_size, wanted_size)
+                    #     )
+                    # )
+                    # os.rename(resized_fname+'.tmp.'+extension, resized_fname)
+                    image = load_HDRDB_envmap(fname)
+                    image = cv2.resize(image, (wanted_size, wanted_size))
+                    save_image(resized_fname, image)
                 else:
+                    raise("NOT IMPLEMENTED!")
                     # TODO: this resizing is possibly incorrect - it does not work in linear colour space - we should convert it to linear, then resize, then back to the original space (assuming sRGB). But maybe it wouldn't make a noticable difference as the original was already LDR (discretised to 256 values)
                     PIL.Image.open(fname)\
                     .resize((wanted_size, wanted_size))\
@@ -411,7 +418,7 @@ def generate_clear_sky_image(resolution, azimuth, elevation):
 def generate_clear_sky_image_and_secondary_channels(resolution, secondary_channels, azimuth, elevation):
     img = generate_clear_sky_image(resolution, azimuth, elevation) / 255
 
-    img = img[..., ::-1] # RGB -> BGR
+    # img = img[..., ::-1] # RGB -> BGR # No longer needed
 
     # add secondary/guiding channels
     polar_distance = (secondary_channels.polar_distance(secondary_channels.phi, secondary_channels.theta, math.fmod(360 + 270 - azimuth, 360) / 180 * np.pi, elevation / 180 * np.pi) + 1) / 2 # ([-1, 1] to [0, 1?])

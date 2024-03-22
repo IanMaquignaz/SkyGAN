@@ -13,7 +13,7 @@
 
 # Training
 python src/stylegan3/train.py \
-    --data=/home/iamaq/workspace/SkyGAN/libs/skymangler/export/export_TRAIN.csv \
+    --data=data/export_TRAIN.csv \
     --resolution=256 --gamma=2 \
     --cfg=stylegan3-t --gpus=1 \
     --batch=32 --batch-gpu=1 --tick=1 --snap=1 \

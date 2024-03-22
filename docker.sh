@@ -10,7 +10,7 @@ DOCKER_BUILD=false
 TENSORBOARD=false
 
 # Get command line arguments
-OPTIONS=bru:e:htT   # -b build, -r run, -e execute, -h help
+OPTIONS=bfru:e:htT   # -b build, -r run, -e execute, -h help
 OPTIONS_LONG=build,run,exec,help
 OPTIND=1 # Holds the number of options parsed by the last call to getopts. Reset in case getopts has been used previously in the shell
 while getopts $OPTIONS opt; do
@@ -26,6 +26,9 @@ while getopts $OPTIONS opt; do
             ;;
         c) # Execute command
             COMMAND=$OPTARG
+            ;;
+        f) # No docker cache
+            NO_CACHE=' --no-cache '
             ;;
         t|T) # Tensorboard
             TENSORBOARD=true
@@ -52,18 +55,21 @@ fi
 
 if [[ $DOCKER_BUILD == true ]]; then
     echo "<?> STARTING DOCKER BUILD <?>"
-    docker compose --project-name $CONTAINER_PROJECT_NAME --file docker-compose.yml stop
-    docker compose --project-name $CONTAINER_PROJECT_NAME --file docker-compose.yml rm -f
-    docker compose --file docker-compose.yml pull
-    docker compose --project-name $CONTAINER_PROJECT_NAME -f docker-compose.yml build --build-arg USER_NAME=$(whoami) --build-arg USER_ID=$(id -u) --build-arg GROUP_ID=$(id -g)
-    docker compose --project-name $CONTAINER_PROJECT_NAME --file docker-compose.yml up --detach --no-recreate
+    docker compose --project-name $CONTAINER_PROJECT_NAME --file .docker/compose.yml stop
+    docker compose --project-name $CONTAINER_PROJECT_NAME --file .docker/compose.yml rm -f
+    docker compose --file .docker/compose.yml pull
+    docker compose --project-name $CONTAINER_PROJECT_NAME -f .docker/compose.yml build $NO_CACHE --build-arg USER_NAME=$(whoami) --build-arg USER_ID=$(id -u) --build-arg GROUP_ID=$(id -g)
 
-    # docker compose --project-name $CONTAINER_PROJECT_NAME exec -u root $CONTAINER_TAG conda update -n base conda -y
-    # docker compose --project-name $CONTAINER_PROJECT_NAME exec  -u root -w /workspace $CONTAINER_TAG conda init bash
-    # docker compose --project-name $CONTAINER_PROJECT_NAME exec  $ARG_USER -w /workspace $CONTAINER_TAG conda env create -f src/stylegan3/environment.yml
-    # docker compose --project-name $CONTAINER_PROJECT_NAME exec  $ARG_USER -w /workspace $CONTAINER_TAG conda init bash
+    if [[ $? -ne 0 ]]; then
+        echo "<?> DOCKER BUILD FAILED <?>"
+        exit 1
+    fi
+
+    docker compose --project-name $CONTAINER_PROJECT_NAME --file .docker/compose.yml up --detach --no-recreate
+
+    # Install custom libraries
+    docker compose --project-name $CONTAINER_PROJECT_NAME exec $ARG_USER -w /workspace/libs/Parametric_SkyModels $CONTAINER_TAG python -m pip install .
 fi
 
 echo "<?> STARTING SHELL IN CONTAINER <?>"
-echo "To start conda env: conda activate stylegan3"
 docker compose --project-name $CONTAINER_PROJECT_NAME exec $ARG_USER $CONTAINER_TAG $COMMAND

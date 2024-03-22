@@ -1,12 +1,9 @@
 # Standard Library
 import os
-import math
-import datetime as dt
 from pathlib import Path
 
 # Machine Vision
 import cv2
-import pandas as pd
 import numpy as np
 
 # Custom
@@ -15,29 +12,30 @@ from envmap import EnvironmentMap
 # Export
 os.environ["OPENCV_IO_ENABLE_OPENEXR"]="1"
 
+DATA_DIR="data/envmap_skylatlong/"
 
 def load_image(path):
     # load the real image
-    path = '/home/iamaq/storage/skymangler/envmap_skylatlong' / Path(path)
+    path = DATA_DIR / Path(path)
     if isinstance(path, Path):
         path = path.as_posix()
-    real_img = cv2.imread(path, flags = cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
-    real_img = cv2.cvtColor(real_img, cv2.COLOR_BGR2RGB)
-    return real_img
+    img = cv2.imread(path, flags = cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    return img
 
 
 def load_HDRDB_envmap(path):
 
     # Load the image
-    real_img = load_image(path)
+    img = load_image(path)
 
-    if real_img.shape[0] != real_img.shape[1]:
+    if img.shape[0] != img.shape[1]:
         # Assume skylatlong
-        e = EnvironmentMap(real_img, 'latlong').convertTo('skyangular')
-        real_img = e.data
+        e = EnvironmentMap(img, 'latlong').convertTo('skyangular')
+        img = e.data
 
     # Done
-    return real_img
+    return img
 
 
 # Parameters for OpenCV imwrite

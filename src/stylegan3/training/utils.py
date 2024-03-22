@@ -14,6 +14,7 @@ def circular_mask(shape):
     mask[:, (x*x+y*y) > 1.0] = 0
     return mask
 
+
 def inject_bottleneck_into_ws(bottleneck, ws):
     #return bottleneck.cuda() # this would replace the ws with bottleneck completely
     # print('bottleneck.shape', bottleneck.shape)
@@ -21,13 +22,13 @@ def inject_bottleneck_into_ws(bottleneck, ws):
     #print('bottleneck mean', bottleneck.mean())
     assert bottleneck.shape[-1] == 10
     assert ws.shape[-1] == 512
-    
+
     #training_stats.report('Extra/utils/inject_bottleneck_min', bottleneck.min())
     #training_stats.report('Extra/utils/inject_bottleneck_mean', bottleneck.mean())
     #training_stats.report('Extra/utils/inject_bottleneck_max', bottleneck.max())
-    
+
     bottleneck_norm = (bottleneck - bottleneck.mean()) / bottleneck.std() # normalise: zero mean, std == 1
-    
+
     #training_stats.report('Extra/utils/inject_bottleneck_norm_min', bottleneck_norm.min())
     #training_stats.report('Extra/utils/inject_bottleneck_norm_mean', bottleneck_norm.mean())
     #training_stats.report('Extra/utils/inject_bottleneck_norm_max', bottleneck_norm.max())
@@ -110,7 +111,7 @@ def invert_log_transform(y):
     else:
         y = exp_y
     y = y - transform_cfg.log_epsilon
-    
+
     if transform_cfg.input_mul != 1.0:
         y = y / transform_cfg.input_mul
     return y
@@ -128,7 +129,7 @@ def invert_log_transform_torch(y):
     else:
         y = exp_y
     y = y - transform_cfg.log_epsilon
-    
+
     if transform_cfg.input_mul != 1.0:
         y = y / transform_cfg.input_mul
     return y
