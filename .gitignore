@@ -9,3 +9,4 @@ out
 *.so
 data_*
 dummy.py
+output

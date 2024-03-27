@@ -12,15 +12,19 @@ from envmap import EnvironmentMap
 # Export
 os.environ["OPENCV_IO_ENABLE_OPENEXR"]="1"
 
-DATA_DIR="data/envmap_skylatlong/"
+# DATA_DIR="datasets/skymangler/envmap_skylatlong/"
 
 def load_image(path):
     # load the real image
-    path = DATA_DIR / Path(path)
+    print(path)
     if isinstance(path, Path):
         path = path.as_posix()
-    img = cv2.imread(path, flags = cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    try:
+        img = cv2.imread(path, flags = cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    except Exception as e:
+        print(f"Error loading file: {path}")
+        raise Exception(f"Error: {e}")
     return img
 
 
@@ -31,7 +35,7 @@ def load_HDRDB_envmap(path):
 
     if img.shape[0] != img.shape[1]:
         # Assume skylatlong
-        e = EnvironmentMap(img, 'latlong').convertTo('skyangular')
+        e = EnvironmentMap(img, 'skylatlong').convertTo('skyangular')
         img = e.data
 
     # Done
@@ -43,11 +47,7 @@ flags_imwrite_EXR_imwrite_float32 = [
     cv2.IMWRITE_EXR_TYPE,
     cv2.IMWRITE_EXR_TYPE_FLOAT # float32
 ]
-def save_image(path, image):
+def save_image(filename, image):
     # save the image
     image = cv2.cvtColor(image.astype(np.float32), cv2.COLOR_RGB2BGR)
-
-    if not isinstance(path, Path):
-        path = Path(path)
-    filename = (path.parent / (path.stem + '.exr')).as_posix()
     cv2.imwrite(filename, image.astype(np.float32), flags_imwrite_EXR_imwrite_float32)

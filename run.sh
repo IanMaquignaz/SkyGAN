@@ -13,11 +13,11 @@
 
 # Training
 python src/stylegan3/train.py \
-    --data=data/export_TRAIN.csv \
+    --data=datasets/skymangler/envmap_skygan_cache/envmap_skylatlong/export_TRAIN.csv \
     --resolution=256 --gamma=2 \
     --cfg=stylegan3-t --gpus=1 \
-    --batch=32 --batch-gpu=1 --tick=1 --snap=1 \
-    --outdir=/home/iamaq/workspace/SkyGAN/output \
+    --batch=32 --batch-gpu=16 --tick=1 --snap=1 \
+    --outdir=output \
     --metrics=fid50k_full \
     --mirror=0 \
     --aug-ada-xflip=0 \

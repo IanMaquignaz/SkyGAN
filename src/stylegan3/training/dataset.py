@@ -293,7 +293,6 @@ class ImageFolderDataset(Dataset):
                 '.' + extension,
                 '.rot_az180' + '.' + extension
             )
-
             if not os.path.isfile(rotated_fname):
                 print('rotating', fname, 'to sun_azimuth == 180 as', rotated_fname)
                 ori_sun_azimuth = self._all_azimuths[raw_idx]
@@ -309,6 +308,7 @@ class ImageFolderDataset(Dataset):
                 image = load_HDRDB_envmap(fname)
                 image = self.rotate_image(image, 180 - ori_sun_azimuth)
                 save_image(rotated_fname, image)
+                # save_image(rotated_fname+'.tmp.'+extension, image)
                 # os.rename(rotated_fname+'.tmp.'+extension, rotated_fname)
 
             fname = rotated_fname
@@ -333,10 +333,11 @@ class ImageFolderDataset(Dataset):
                     #         (wanted_size, wanted_size)
                     #     )
                     # )
-                    # os.rename(resized_fname+'.tmp.'+extension, resized_fname)
                     image = load_HDRDB_envmap(fname)
                     image = cv2.resize(image, (wanted_size, wanted_size))
                     save_image(resized_fname, image)
+                    # save_image(resized_fname+'.tmp.'+extension, image)
+                    # os.rename(resized_fname+'.tmp.'+extension, resized_fname)
                 else:
                     raise("NOT IMPLEMENTED!")
                     # TODO: this resizing is possibly incorrect - it does not work in linear colour space - we should convert it to linear, then resize, then back to the original space (assuming sRGB). But maybe it wouldn't make a noticable difference as the original was already LDR (discretised to 256 values)

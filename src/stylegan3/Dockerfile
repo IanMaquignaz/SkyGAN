@@ -1,19 +1,12 @@
-# Dockerfile for running StyleGAN3/SkyGAN
-
-# Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
-#
-# NVIDIA CORPORATION and its licensors retain all intellectual property
-# and proprietary rights in and to this software, related documentation
-# and any modifications thereto.  Any use, reproduction, disclosure or
-# distribution of this software and related documentation without an express
-# license agreement from NVIDIA CORPORATION is strictly prohibited.
-
-
 # StyleGAN3
-FROM nvcr.io/nvidia/pytorch:21.08-py3
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
+FROM nvidia/cuda:12.3.2-runtime-ubuntu22.04
+
+# WORKING DIRECTORY
 WORKDIR /workspace
+
+# Set Timezone
+ENV TZ=America/Montreal
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 
 # Update the box (refresh apt-get)
@@ -21,6 +14,73 @@ WORKDIR /workspace
 # This uses '--fix-missing' only if something fails.
 RUN apt-get update -y --fix-missing
 RUN apt-get update -y && if [ $? -ne 0 ] ; then apt-get update -y --fix-missing ; fi ;
+
+# Install apt-get requirements
+RUN apt-get install -y tmux htop task-spooler
+RUN apt-get install -y wget curl iputils-ping
+RUN apt-get install -y zip unzip nano
+RUN apt-get install -y git build-essential cmake pkg-config
+RUN apt-get install -y software-properties-common
+RUN apt install -y libssl-dev libffi-dev
+
+# Other requirements
+COPY requirements_aptGet.txt .
+RUN xargs apt-get install -y < ./requirements_aptGet.txt
+
+
+# Install Python
+ARG PYTHON="python3.9"
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+RUN add-apt-repository ppa:deadsnakes/ppa
+RUN apt-get update -y
+RUN apt-get install -y $PYTHON ${PYTHON}-dev ${PYTHON}-distutils
+RUN curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+RUN $PYTHON get-pip.py
+RUN $PYTHON -m pip install --upgrade pip
+RUN pip3 install --upgrade pip
+RUN update-alternatives --install /usr/bin/python python $(which $PYTHON) 1
+
+# Install Python requirements
+RUN $PYTHON -m pip install debugpy numpy tqdm
+
+# Get python requirements
+# Docker python requirements are required
+COPY requirements_python.txt ./
+RUN $PYTHON -m pip install -r ./requirements_python.txt
+
+# SlackTools and Utils python requirements are optional
+# But docker copy needs at least one file to exist
+# SlackTools
+COPY requirements_python.txt requirements_python_customLibs.txt ./
+RUN test -f requirements_python_customLibs.txt && $PYTHON -m pip install -r ./requirements_python_customLibs.txt
+
+# Update CMake
+RUN $PYTHON -m pip install cmake --upgrade
+
+
+# OpenEXR
+RUN cd ~
+RUN git clone --recursive https://github.com/AcademySoftwareFoundation/openexr.git
+RUN cd openexr && git checkout release
+RUN mkdir -p openexr/build
+RUN apt-get install libghc-half-dev libopenexr-dev -y
+RUN cd openexr/build && cmake .. && make -j8 && make install
+RUN $PYTHON -m pip install openexr
+
+
+# OpenCV
+RUN apt-get install -y build-essential cmake git pkg-config libgtk-3-dev \
+    libavcodec-dev libavformat-dev libswscale-dev libv4l-dev \
+    libxvidcore-dev libx264-dev libjpeg-dev libpng-dev libtiff-dev \
+    gfortran libatlas-base-dev python3-numpy \
+    libtbb2 libtbb-dev libdc1394-dev
+RUN $PYTHON -m pip install opencv-python
+
+
+# Pillow
+RUN apt-get install -y libjpeg8-dev zlib1g-dev
+RUN $PYTHON -m pip install --upgrade pip Pillow
 
 
 # Creates a non-root user with an explicit UID

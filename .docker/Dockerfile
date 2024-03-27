@@ -95,6 +95,9 @@ ARG GROUP_ID=8765
 RUN groupadd -g ${GROUP_ID} docker
 RUN useradd -u ${USER_ID} -g ${GROUP_ID} -m -s /bin/bash ${USER_NAME}
 RUN echo "${USER_NAME}:toor" |  chpasswd
+RUN mkdir /local
+RUN chown ${USER_ID}:${GROUP_ID} /local
+
 USER $USER_ID:${GROUP_ID}
 
 # Create links for local installs

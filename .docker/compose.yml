@@ -1,25 +1,25 @@
 version: "3.8"
 
 services:
-  stylegan3: &stylegan3
+  stylegan3:
     build: .
     hostname: stylegan3
     container_name: stylegan3
     privileged: true
+    stdin_open: true
+    tty: true
+    shm_size: '8gb'
+    volumes:
+      - ..:/workspace
+      - ../datasets/skymangler:/workspace/datasets/skymangler
     deploy:
       resources:
         reservations:
           devices:
-          - driver: nvidia
-            device_ids: ['1', '2']
-            capabilities: [gpu, compute, graphics]
-    shm_size: '2gb'
-    volumes:
-      - ..:/workspace
-      - ../datasets/skymangler/envmap_skylatlong:/workspace/data/envmap_skylatlong
+            - driver: nvidia
+              device_ids: ['1', '2']
+              capabilities: [gpu]
     environment:
       CACHE_DIR: "/local"
       PYTHONPATH: "/workspace" # needed so that Python finds the built Python 'sky_image_generator' module
       DNNLIB_CACHE_DIR: "/local"
-    stdin_open: true # docker run -i
-    tty: true        # docker run -t

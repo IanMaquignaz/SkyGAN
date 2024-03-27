@@ -55,6 +55,7 @@ fi
 
 if [[ $DOCKER_BUILD == true ]]; then
     echo "<?> STARTING DOCKER BUILD <?>"
+    docker nvidia/cuda:12.3.2-runtime-ubuntu22.04
     docker compose --project-name $CONTAINER_PROJECT_NAME --file .docker/compose.yml stop
     docker compose --project-name $CONTAINER_PROJECT_NAME --file .docker/compose.yml rm -f
     docker compose --file .docker/compose.yml pull
@@ -69,6 +70,7 @@ if [[ $DOCKER_BUILD == true ]]; then
 
     # Install custom libraries
     docker compose --project-name $CONTAINER_PROJECT_NAME exec $ARG_USER -w /workspace/libs/Parametric_SkyModels $CONTAINER_TAG python -m pip install .
+    # docker compose --project-name $CONTAINER_PROJECT_NAME exec $ARG_USER -w /workspace/libs/research-utils $CONTAINER_TAG python -m pip install .
 fi
 
 echo "<?> STARTING SHELL IN CONTAINER <?>"
