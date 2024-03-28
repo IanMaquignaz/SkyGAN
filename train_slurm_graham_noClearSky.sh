@@ -10,14 +10,13 @@ ENV_NAME="ENV_SKYGAN"
 
 # Training
 CACHE_DIR=datasets/skymangler_skygan_cache/cache
-OUTPUT_DIR=output_SkyGAN
-
+OUTPUT_DIR=output_SkyGAN_noClearSky
 
 sbatch << EOT
 #!/bin/bash -l
 
 ### NAME ###
-#SBATCH --job-name="Train_SkyGAN"
+#SBATCH --job-name="Train_SkyGAN_noClearSky"
 
 ### TIME ###
 ### Time formats:
@@ -131,7 +130,7 @@ echo "@@@@@@@@@@@@@@@@@@ Run Started @@@@@@@@@@@@@@@@@@@@@@@@@"
 date
 echo "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"
 echo "################################################################"
-TAG="SkyGAN_\${SLURM_JOB_ID}"
+TAG="SkyGAN_noClearSky_\${SLURM_JOB_ID}"
 
 if $CREATE_ENV_LOCAL; then
     ENV_ACTIVATE_PATH=\${SLURM_TMPDIR}/\${ENV_NAME}_LOCAL/bin/activate
@@ -150,6 +149,7 @@ else
     "
 fi
 echo "Environment will be sourced from \$ENV_ACTIVATE_PATH"
+
 
 # Run Model
 time srun --output="logs/sbatch_%x_id%j_n%n_t%t.txt" bash -c " \
@@ -175,7 +175,7 @@ time srun --output="logs/sbatch_%x_id%j_n%n_t%t.txt" bash -c " \
     --aug-ada-aniso=0 \
     --aug-ada-xfrac=0 \
     --normalize-azimuth=True \
-    --use-encoder=True \
+    --use-encoder=False \
 
 # DEFAULT OPTIONS:
 # @click.option('--resume',       help='Resume from given network pickle', metavar='[PATH|URL]',  type=str)
