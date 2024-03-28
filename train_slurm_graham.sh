@@ -8,13 +8,20 @@ GLOBAL_COMMAND=""
 CREATE_ENV_LOCAL=true
 ENV_NAME="ENV_SKYGAN"
 
-RESUME_FROM="logs/DeepClouds_17995032/DeepClouds/hpc_ckpt_3.ckpt"
+# RESUME_FROM="logs/SkyGAN/hpc_ckpt_3.ckpt"
+
+# Flush Pre-processed
+# rm datasets/skymangler_skygan_cache/envmap_skylatlong/*.resized256.*exr
+
+# Training
+CACHE_DIR=datasets/skymangler_skygan_cache/cache
+
 
 sbatch << EOT
 #!/bin/bash -l
 
 ### NAME ###
-#SBATCH --job-name="Train_DeepClouds"
+#SBATCH --job-name="Train_SkyGAN"
 
 ### TIME ###
 ### Time formats:
@@ -43,7 +50,7 @@ sbatch << EOT
 ### HARDWARE ###
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=124G
-#SBATCH --gres="gpu:p100:1"
+#SBATCH --gres="gpu:p100:2"
 
 ### OPTIONAL ###
 ## --test-only Validate the batch script and return an queue time estimate
@@ -128,7 +135,7 @@ echo "@@@@@@@@@@@@@@@@@@ Run Started @@@@@@@@@@@@@@@@@@@@@@@@@"
 date
 echo "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"
 echo "################################################################"
-TAG="DeepClouds_\${SLURM_JOB_ID}"
+TAG="SkyGAN_\${SLURM_JOB_ID}"
 
 if $CREATE_ENV_LOCAL; then
     ENV_ACTIVATE_PATH=\${SLURM_TMPDIR}/\${ENV_NAME}_LOCAL/bin/activate
@@ -166,21 +173,29 @@ time srun --output="logs/sbatch_%x_id%j_n%n_t%t.txt" bash -c " \
     export TORCH_NCCL_BLOCKING_WAIT=1 && \
     export NCCL_DEBUG=INFO && \
     export PYTHONFAULTHANDLER=1 && \
-    python -u run.py train --slurm \
-        --RUN_TRAINING=False \
-        --RUN_TESTING=True  \
-        --RUN_PREDICT=True  \
-        --devices=auto --num_workers=16 \
-        --tonemap=MIXED \
-        --tag=\${TAG} \
-        --max_epochs=3500 \
-        --output_dir=logs/\${TAG} \
-        --cache_DISK_path=\${SLURM_TMPDIR}/cache/skymangler_envmap_skylatlong \
-        \$RESUME_FROM \
-    "
+    export CACHE_DIR=$CACHE_DIR && \
+    export DNNLIB_CACHE_DIR=$CACHE_DIR && \
+    python -u src/stylegan3/train.py \
+    --data=datasets/skymangler_skygan_cache/envmap_skylatlong/export_TRAIN.csv \
+    --resolution=256 --gamma=2 \
+    --cfg=stylegan3-t --gpus=2 \
+    --batch=32 --batch-gpu=16 --tick=1 --snap=1 \
+    --outdir=output \
+    --metrics=fid50k_full \
+    --mirror=0 \
+    --aug-ada-xflip=0 \
+    --aug-ada-rotate90=0 \
+    --aug-ada-xint=0 \
+    --aug-ada-scale=0 \
+    --aug-ada-rotate=1 \
+    --aug-ada-aniso=0 \
+    --aug-ada-xfrac=0 \
+    --normalize-azimuth=True \
+    --use-encoder=True \
 
 # DEFAULT OPTIONS:
-# --HDRDB_path=datasets/skymangler/envmap_skylatlong
+# @click.option('--resume',       help='Resume from given network pickle', metavar='[PATH|URL]',  type=str)
+
 
 echo ""
 echo "################################################################"

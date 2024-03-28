@@ -10,14 +10,17 @@
 #     --outdir=out \
 #     --azimuth=180 --elevations=10,70
 
-CACHE_DIR=datasets/skymangler_skygan_cache/cache
+# Flush Pre-processed
+rm datasets/skymangler_skygan_cache/envmap_skylatlong/*.resized256.*exr
 
 # Training
+CACHE_DIR=datasets/skymangler_skygan_cache/cache
+
 CACHE_DIR=$CACHE_DIR DNNLIB_CACHE_DIR=$CACHE_DIR python src/stylegan3/train.py \
     --data=datasets/skymangler_skygan_cache/envmap_skylatlong/export_TRAIN.csv \
     --resolution=256 --gamma=2 \
     --cfg=stylegan3-t --gpus=1 \
-    --batch=32 --batch-gpu=16 --tick=1 --snap=1 \
+    --batch=32 --batch-gpu=4 --tick=1 --snap=1 \
     --outdir=output \
     --metrics=fid50k_full \
     --mirror=0 \
@@ -31,6 +34,9 @@ CACHE_DIR=$CACHE_DIR DNNLIB_CACHE_DIR=$CACHE_DIR python src/stylegan3/train.py \
     --normalize-azimuth=True \
     --use-encoder=True \
 
+# TEMP
+# --use-encoder=True \ # NEEDS TO BE TRUE!
+# --normalize-azimuth=True \ # NEEDS TO BE TRUE!
 
 # Parameters
 # --tick How often to print progress

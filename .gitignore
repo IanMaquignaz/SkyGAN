@@ -11,3 +11,5 @@ data_*
 dummy.py
 output
 core.*
+ENV_*
+tmp

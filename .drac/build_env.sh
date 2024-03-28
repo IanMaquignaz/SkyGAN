@@ -71,6 +71,7 @@ $PYTHON -m pip install --upgrade -r ./.drac/requirements_python_external.txt
 cd libs
 # Use SkyLibs branch main (if possible)
 $PYTHON -m pip install --compile Parametric_SkyModels/
+$PYTHON -m pip install --compile skylibs/
 
 # Save modules
 module save ${ENV_NAME}_modules

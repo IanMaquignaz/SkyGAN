@@ -286,83 +286,23 @@ class ImageFolderDataset(Dataset):
         multiplier = self._all_multipliers[raw_idx]
         wanted_size = self._resolution
 
-        extension = fname.split('.')[-1]
+        assert fname.split('.')[-1] == 'exr'
+
+        image = load_HDRDB_envmap(fname)
 
         if self._normalize_azimuth:
-            rotated_fname = fname.replace(
-                '.' + extension,
-                '.rot_az180' + '.' + extension
-            )
-            if not os.path.isfile(rotated_fname):
-                print('rotating', fname, 'to sun_azimuth == 180 as', rotated_fname)
-                ori_sun_azimuth = self._all_azimuths[raw_idx]
-                assert extension == 'exr' # TODO png support?
-                # cv2.imwrite(
-                #     rotated_fname+'.tmp.'+extension,
-                #     self.rotate_image(
-                #         # cv2.imread(fname, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH),
-                #         load_HDRDB_envmap(fname),
-                #         180 - ori_sun_azimuth
-                #     )
-                # )
-                image = load_HDRDB_envmap(fname)
-                image = self.rotate_image(image, 180 - ori_sun_azimuth)
-                save_image(rotated_fname, image)
-                # save_image(rotated_fname+'.tmp.'+extension, image)
-                # os.rename(rotated_fname+'.tmp.'+extension, rotated_fname)
-
-            fname = rotated_fname
+            ori_sun_azimuth = self._all_azimuths[raw_idx]
+            image = self.rotate_image(image, 180 - ori_sun_azimuth)
 
         if wanted_size is not None:
-            resized_fname = fname.replace(
-                '.' + extension,
-                '.resized' + str(wanted_size) + '.' + extension
-            )
+            image = cv2.resize(image, (wanted_size, wanted_size))
 
-            if not os.path.isfile(resized_fname):
-                print('resizing', fname, 'to', wanted_size, 'as', resized_fname)
+        if image.shape[2] == 4:
+            image = image[:,:,:3] # remove alpha channel if present
 
-                if extension == 'exr':
-                    #imageio.imwrite(resized_fname, cv2.resize(imageio.imread(fname), (wanted_size, wanted_size)))
-                    #imageio.imwrite(resized_fname.replace('.exr', '.png'), (imageio.imread(fname)[:,:,:3]*255).clip(0, 255).astype(np.uint8))
-                    # cv2.imwrite(
-                    #     resized_fname+'.tmp.'+extension,
-                    #     cv2.resize(
-                    #         # cv2.imread(fname, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH),
-                    #         load_HDRDB_envmap(fname),
-                    #         (wanted_size, wanted_size)
-                    #     )
-                    # )
-                    image = load_HDRDB_envmap(fname)
-                    image = cv2.resize(image, (wanted_size, wanted_size))
-                    save_image(resized_fname, image)
-                    # save_image(resized_fname+'.tmp.'+extension, image)
-                    # os.rename(resized_fname+'.tmp.'+extension, resized_fname)
-                else:
-                    raise("NOT IMPLEMENTED!")
-                    # TODO: this resizing is possibly incorrect - it does not work in linear colour space - we should convert it to linear, then resize, then back to the original space (assuming sRGB). But maybe it wouldn't make a noticable difference as the original was already LDR (discretised to 256 values)
-                    PIL.Image.open(fname)\
-                    .resize((wanted_size, wanted_size))\
-                    .save(resized_fname)
+        image *= multiplier
+        image = training.training_loop.unstretch(training.utils.log_transform(image)) # to roughly [0, 1+]
 
-            fname = resized_fname
-
-        with self._open_file(fname) as f:
-            if pyspng is not None and self._file_ext(fname) == '.png':
-                image = pyspng.load(f.read())
-            elif self._file_ext(fname) == '.exr':
-                # image = cv2.imread(fname, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)[:,:,::-1] # BGR -> RGB
-                image = load_HDRDB_envmap(fname)
-                if image.shape[2] == 4:
-                    image = image[:,:,:3] # remove alpha channel if present
-
-                image *= multiplier
-                image = training.training_loop.unstretch(training.utils.log_transform(image)) # to roughly [0, 1+]
-                #image = np.clip(image, 0, 1) # DEBUG
-
-                #print('image', image.min(), image.mean(), np.median(image), image.max())
-            else:
-                image = np.array(PIL.Image.open(f))
         #print('image.shape', image.shape)
         assert image.shape[0] == image.shape[1] # square
         if wanted_size is not None:
@@ -371,7 +311,102 @@ class ImageFolderDataset(Dataset):
         if image.ndim == 2:
             image = image[:, :, np.newaxis] # HW => HWC
         image = image.transpose(2, 0, 1) # HWC => CHW
-        return image
+        return image.astype(np.float32)
+
+    '''WARNING! Removed as the excessive IO created race conditions...'''
+    # def _load_raw_image(self, raw_idx):
+    #     fname = self._image_fnames[raw_idx]
+    #     multiplier = self._all_multipliers[raw_idx]
+    #     wanted_size = self._resolution
+
+    #     extension = fname.split('.')[-1]
+
+    #     if self._normalize_azimuth:
+    #         rotated_fname = fname.replace(
+    #             '.' + extension,
+    #             '.rot_az180' + '.' + extension
+    #         )
+    #         if not os.path.isfile(rotated_fname):
+    #             print('rotating', fname, 'to sun_azimuth == 180 as', rotated_fname)
+    #             ori_sun_azimuth = self._all_azimuths[raw_idx]
+    #             assert extension == 'exr' # TODO png support?
+    #             # cv2.imwrite(
+    #             #     rotated_fname+'.tmp.'+extension,
+    #             #     self.rotate_image(
+    #             #         # cv2.imread(fname, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH),
+    #             #         load_HDRDB_envmap(fname),
+    #             #         180 - ori_sun_azimuth
+    #             #     )
+    #             # )
+    #             image = load_HDRDB_envmap(fname)
+    #             image = self.rotate_image(image, 180 - ori_sun_azimuth)
+    #             save_image(rotated_fname, image)
+    #             # save_image(rotated_fname+'.tmp.'+extension, image)
+    #             # os.rename(rotated_fname+'.tmp.'+extension, rotated_fname)
+
+    #         fname = rotated_fname
+
+    #     if wanted_size is not None:
+    #         resized_fname = fname.replace(
+    #             '.' + extension,
+    #             '.resized' + str(wanted_size) + '.' + extension
+    #         )
+
+    #         if not os.path.isfile(resized_fname):
+    #             print('resizing', fname, 'to', wanted_size, 'as', resized_fname)
+
+    #             if extension == 'exr':
+    #                 #imageio.imwrite(resized_fname, cv2.resize(imageio.imread(fname), (wanted_size, wanted_size)))
+    #                 #imageio.imwrite(resized_fname.replace('.exr', '.png'), (imageio.imread(fname)[:,:,:3]*255).clip(0, 255).astype(np.uint8))
+    #                 # cv2.imwrite(
+    #                 #     resized_fname+'.tmp.'+extension,
+    #                 #     cv2.resize(
+    #                 #         # cv2.imread(fname, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH),
+    #                 #         load_HDRDB_envmap(fname),
+    #                 #         (wanted_size, wanted_size)
+    #                 #     )
+    #                 # )
+    #                 image = load_HDRDB_envmap(fname)
+    #                 image = cv2.resize(image, (wanted_size, wanted_size))
+    #                 save_image(resized_fname, image)
+    #                 # save_image(resized_fname+'.tmp.'+extension, image)
+    #                 # os.rename(resized_fname+'.tmp.'+extension, resized_fname)
+    #             else:
+    #                 raise("NOT IMPLEMENTED!")
+    #                 # TODO: this resizing is possibly incorrect - it does not work in linear colour space - we should convert it to linear, then resize, then back to the original space (assuming sRGB). But maybe it wouldn't make a noticable difference as the original was already LDR (discretised to 256 values)
+    #                 PIL.Image.open(fname)\
+    #                 .resize((wanted_size, wanted_size))\
+    #                 .save(resized_fname)
+
+    #         fname = resized_fname
+
+    #     with self._open_file(fname) as f:
+    #         if pyspng is not None and self._file_ext(fname) == '.png':
+    #             raise Exception("NOT IMPLEMENTED.")
+    #             image = pyspng.load(f.read())
+    #         elif self._file_ext(fname) == '.exr':
+    #             # image = cv2.imread(fname, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)[:,:,::-1] # BGR -> RGB
+    #             image = load_HDRDB_envmap(fname)
+    #             if image.shape[2] == 4:
+    #                 image = image[:,:,:3] # remove alpha channel if present
+
+    #             image *= multiplier
+    #             image = training.training_loop.unstretch(training.utils.log_transform(image)) # to roughly [0, 1+]
+    #             #image = np.clip(image, 0, 1) # DEBUG
+
+    #             #print('image', image.min(), image.mean(), np.median(image), image.max())
+    #         else:
+    #             raise Exception("NOT IMPLEMENTED.")
+    #             image = np.array(PIL.Image.open(f))
+    #     #print('image.shape', image.shape)
+    #     assert image.shape[0] == image.shape[1] # square
+    #     if wanted_size is not None:
+    #         assert image.shape[0] == wanted_size
+
+    #     if image.ndim == 2:
+    #         image = image[:, :, np.newaxis] # HW => HWC
+    #     image = image.transpose(2, 0, 1) # HWC => CHW
+    #     return image
 
     def _load_raw_labels(self):
         fname = 'dataset.json'
