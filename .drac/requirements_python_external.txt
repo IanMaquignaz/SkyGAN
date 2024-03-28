@@ -1,0 +1,3 @@
+skylibs
+pysolar
+ffmpeg-python

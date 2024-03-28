@@ -10,10 +10,11 @@
 #     --outdir=out \
 #     --azimuth=180 --elevations=10,70
 
+CACHE_DIR=datasets/skymangler_skygan_cache/cache
 
 # Training
-python src/stylegan3/train.py \
-    --data=datasets/skymangler/envmap_skygan_cache/envmap_skylatlong/export_TRAIN.csv \
+CACHE_DIR=$CACHE_DIR DNNLIB_CACHE_DIR=$CACHE_DIR python src/stylegan3/train.py \
+    --data=datasets/skymangler_skygan_cache/envmap_skylatlong/export_TRAIN.csv \
     --resolution=256 --gamma=2 \
     --cfg=stylegan3-t --gpus=1 \
     --batch=32 --batch-gpu=16 --tick=1 --snap=1 \
@@ -41,7 +42,7 @@ python src/stylegan3/train.py \
 # python train.py
 #     --data /projects/SkyGAN/clouds_fisheye/auto_processed/auto_processed_20230405_1727.csv
 #     --resolution=256 --gamma=2
-#     --cfg=stylegan3-t --gpus=1
+#     --cfg=stylegan3-t --gpus=2
 #     --batch=32 --batch-gpu=4 --tick=1 --snap=10
 #     --outdir=/local/stylegan3-encoder
 #     --metrics=fid50k_full

@@ -1,0 +1,4 @@
+virtualenv-clone
+pytorch_fid
+torch-fidelity
+torch<=1.9.1
