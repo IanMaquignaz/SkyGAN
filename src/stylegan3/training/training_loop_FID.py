@@ -73,9 +73,9 @@ def setup_snapshot_image_grid(training_set, random_seed=0):
 
     # Load data.
     images, labels = zip(*[training_set[i] for i in grid_indices])
-    
+
     images = stretch(np.stack(images))
-    
+
     return (gw, gh), images, np.stack(labels)
 
 #----------------------------------------------------------------------------
@@ -95,7 +95,7 @@ def save_image_grid(img, fname, drange, grid_size=[1,1], hdr=False):
     img = img.reshape([gh, gw, C, H, W])
     img = img.transpose(0, 3, 1, 4, 2) # gh, H, gw, W, C
     img = img.reshape([gh * H, gw * W, C])
-    
+
     if hdr:
         saved_successfully = cv2.imwrite(fname, img[:1024, :1024, ::-1]) # crop and RGB -> BGR
         assert saved_successfully
@@ -117,7 +117,7 @@ def run_E_and_G(E_ema, G_ema, clear_images, clear_labels, batch_gpu, device, gri
     #training_stats.report('Extra/run_E_and_G/clear_images_min', clear_images.min())
     #training_stats.report('Extra/run_E_and_G/clear_images_mean', clear_images.mean())
     #training_stats.report('Extra/run_E_and_G/clear_images_max', clear_images.max())
-    
+
     if use_encoder:
         if dump_images:
             ci = torch.Tensor(clear_images).to(device).split(batch_gpu)[0][:1].cpu().numpy()
@@ -143,7 +143,7 @@ def run_E_and_G(E_ema, G_ema, clear_images, clear_labels, batch_gpu, device, gri
         bottlenecks = (None for i in range(len(grid_z)))
 
     images = torch.cat([G_ema(z=z, c=c, injected_bottlenecks=b, noise_mode='const').cpu() for z, c, b in zip(grid_z, grid_c, bottlenecks)]).numpy()
-    
+
     if dump_images:
         save_image_grid(training.utils.generator_output_extract_clear(images[:1]), os.path.join(run_dir, 'tmp_training_clears_rec_init.png'), drange=[-1,1])
 
@@ -216,6 +216,9 @@ def training_loop(
         print('Num images: ', len(training_set))
         print('Image shape:', training_set.image_shape)
         print('Label shape:', training_set.label_shape)
+        print('Num images Clear: ', len(clear_training_set))
+        print('Image shape Clear:', clear_training_set.image_shape)
+        print('Label shape: Clear', clear_training_set.label_shape)
         print()
 
     # Construct networks.
@@ -283,7 +286,7 @@ def training_loop(
         ('EG', [E, G], [E_opt_kwargs, G_opt_kwargs], 1, EG_reg_interval),
         ('D', [D], [D_opt_kwargs], 1, D_reg_interval)
         ]:
-    
+
         if reg_interval is None:
             print(name, 'will merge "main" and "reg" into "both"')
             #opt = dnnlib.util.construct_class_by_name(params=module.parameters(), **opt_kwargs) # subclass of torch.optim.Optimizer
@@ -366,13 +369,17 @@ def training_loop(
                 with open(snapshot_pkl, 'wb') as f:
                     print('DEBUG: skipping pickle dump')
                     #pickle.dump(snapshot_data, f)
-        
+
         # Evaluate metrics.
         snapshot_data='something not None'
         if (snapshot_data is not None) and (len(metrics) > 0):
             if rank == 0:
                 print('Evaluating metrics...')
+                print('metrics: ', metrics)
+                print('training_set_kwargs:', training_set_kwargs)
+                print('clear_training_set_kwargs:', clear_training_set_kwargs)
             for metric in metrics:
+                print('running metric:', metric)
                 result_dict = metric_main.calc_metric(
                     metric=metric,
                     E=E,

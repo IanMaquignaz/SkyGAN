@@ -8,7 +8,7 @@ matplotlib
 torchmetrics
 imageio
 scikit_image
-pybind11
+pybind11[global]
 numpy
 pillow
 diskcache

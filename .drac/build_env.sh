@@ -32,7 +32,7 @@ module --force purge
 # or use 'module spider <your_package>'
 PYTHON_VERSION="3.9"
 PYTHON="python$PYTHON_VERSION"
-module load StdEnv/2020 gcc cuda/11.8.0 opencv python/3.9.6
+module load StdEnv/2020 gcc cuda opencv python/$PYTHON_VERSION
 # Warning!
 # Python3.9 is not compatible with StdEnv/2023
 
@@ -51,7 +51,7 @@ source $SLURM_TMPDIR/$ENV_NAME/bin/activate
 export PIP_REQUIRE_VIRTUALENV=1
 
 # Upgrade pip
-$PYTHON -m pip install --no-index --upgrade pip
+$PYTHON -m pip install --no-index --upgrade pip setuptools wheel
 
 # 1. Fastest & Most Reliable Source
 # Install dependencies (internal; --no-index searches computecanada)
@@ -69,9 +69,12 @@ $PYTHON -m pip install --upgrade -r ./.drac/requirements_python_external.txt
 
 # Install custom packages
 cd libs
+$PYTHON -m pip install --compile -e research-utils/
 # Use SkyLibs branch main (if possible)
-$PYTHON -m pip install --compile Parametric_SkyModels/
-$PYTHON -m pip install --compile skylibs/
+$PYTHON -m pip install --compile -e skylibs/
+
+$PYTHON -m pip install --compile -e blender-runner/
+$PYTHON -m pip install --compile -e Parametric_SkyModels/
 
 # Save modules
 module save ${ENV_NAME}_modules

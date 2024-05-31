@@ -10,12 +10,19 @@
 #     --outdir=out \
 #     --azimuth=180 --elevations=10,70
 
-# Flush Pre-processed
-rm datasets/skymangler_skygan_cache/envmap_skylatlong/*.resized256.*exr
 
-# Training
+# Constants
 CACHE_DIR=datasets/skymangler_skygan_cache/cache
 
+# CACHE_DIR=$CACHE_DIR DNNLIB_CACHE_DIR=$CACHE_DIR python src/stylegan3/calc_metrics.py \
+#     --metrics=fid50k_full --gpus=1 --verbose=True \
+#     --data=~/datasets/ffhq-1024x1024.zip --mirror=1 \
+#     --network=file:///scratch/iamaq/SkyGAN/skymangler_skygan_cache/cache/downloads/stylegan3-t-ffhq-1024x1024.pkl
+
+#     # --network=https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-t-ffhq-1024x1024.pkl
+# exit
+
+# Training
 CACHE_DIR=$CACHE_DIR DNNLIB_CACHE_DIR=$CACHE_DIR python src/stylegan3/train.py \
     --data=datasets/skymangler_skygan_cache/envmap_skylatlong/export_TRAIN.csv \
     --resolution=256 --gamma=2 \

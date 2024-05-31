@@ -32,7 +32,7 @@ sbatch << EOT
 #SBATCH --mail-type=ALL
 
 ### OUTPUT x=job-name, j=job-ID, n=node-number ###
-#SBATCH --output="logs/sbatch_%x_id%j.txt"
+#SBATCH --output="$OUTPUT_DIR/sbatch_%x_id%j.txt"
 
 ### REQUEING ###
 #SBATCH --requeue
@@ -46,6 +46,10 @@ sbatch << EOT
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64G
 #SBATCH --gres="gpu:p100:2"
+
+### OPTIONAL ###
+## --exclusive to get the whole nodes exclusively for this job
+#SBATCH --exclusive
 
 ### OPTIONAL ###
 ## --test-only Validate the batch script and return an queue time estimate
@@ -152,13 +156,12 @@ echo "Environment will be sourced from \$ENV_ACTIVATE_PATH"
 
 
 # Run Model
-time srun --output="logs/sbatch_%x_id%j_n%n_t%t.txt" bash -c " \
+time srun --output="$OUTPUT_DIR/sbatch_%x_id%j_n%n_t%t.txt" bash -c " \
     \$ENV_COMMAND && \
     export TORCH_NCCL_BLOCKING_WAIT=1 && \
     export NCCL_DEBUG=INFO && \
     export PYTHONFAULTHANDLER=1 && \
-    export CACHE_DIR=$CACHE_DIR && \
-    export DNNLIB_CACHE_DIR=$CACHE_DIR && \
+    CACHE_DIR=$CACHE_DIR DNNLIB_CACHE_DIR=$CACHE_DIR \
     python -u src/stylegan3/train.py \
     --data=datasets/skymangler_skygan_cache/envmap_skylatlong/export_TRAIN.csv \
     --resolution=256 --gamma=2 \
@@ -176,6 +179,8 @@ time srun --output="logs/sbatch_%x_id%j_n%n_t%t.txt" bash -c " \
     --aug-ada-xfrac=0 \
     --normalize-azimuth=True \
     --use-encoder=False \
+    "
+
 
 # DEFAULT OPTIONS:
 # @click.option('--resume',       help='Resume from given network pickle', metavar='[PATH|URL]',  type=str)

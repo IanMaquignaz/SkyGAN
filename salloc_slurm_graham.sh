@@ -8,6 +8,11 @@
 DIR_LOGS="logs"
 ENV_NAME="ENV_SKYGAN"
 
+# Training
+CACHE_DIR=datasets/skymangler_skygan_cache/cache
+OUTPUT_DIR=output_SkyGAN
+
+
 ### ------------------------------------------------------------------------------ ###
 ##------------------------##
 #### Virtual Environment ####
@@ -64,11 +69,11 @@ ENV_NAME="ENV_SKYGAN"
 #     \
 #     `### EXECUTIBLE ###` \
 #     srun --output="${DIR_LOGS}/salloc_%x_id%j_n%n_t%t.txt" train.sh
-JOB_ID=$(squeue -u iamaq --noheader --format="%A %j" | grep SALLOC_DeepClouds | cut -f1 -d' ')
+JOB_ID=$(squeue -u iamaq --noheader --format="%A %j" | grep SALLOC_SkyGAN | cut -f1 -d' ')
 if [ -z "$JOB_ID" ]; then
     LOG_FILE="${DIR_LOGS}/salloc_id%j_n%n_t%t.txt"
     salloc \
-        --job-name="SALLOC_DeepClouds" \
+        --job-name="SALLOC_SkyGAN" \
         --account=def-jlalonde_gpu  `### RUNTIME ###` \
         --time="3:0:0" `### TIME (3+hrs gets put in queue) ###`  \
         \
@@ -86,7 +91,7 @@ if [ -z "$JOB_ID" ]; then
         --mem=64G `# CPU memory per node` \
         --gres="gpu:p100:2" `# GPUs per instance` \
 
-    JOB_ID=$(squeue -u iamaq --noheader --format="%A %j" | grep SALLOC_DeepClouds | cut -f1 -d' ')
+    JOB_ID=$(squeue -u iamaq --noheader --format="%A %j" | grep SALLOC_SkyGAN | cut -f1 -d' ')
 fi
 
 
@@ -125,3 +130,30 @@ fi
 #     --val_every_n_epochs=1 --log_every_n_steps=5 \
 #     --tag=__TEST__ \
 #     "
+srun --jobid $JOB_ID \
+    --output=$OUTPUT_DIR/salloc_id%j_n%n_t%t.txt --nodes=1 --ntasks-per-node=1 \
+    bash -c " \
+    module restore ${ENV_NAME}_modules && \
+    source $ENV_NAME/bin/activate && \
+    export TORCH_NCCL_BLOCKING_WAIT=1 && \
+    export NCCL_DEBUG=INFO && \
+    export PYTHONFAULTHANDLER=1 && \
+    CACHE_DIR=$CACHE_DIR DNNLIB_CACHE_DIR=$CACHE_DIR \
+    python -u src/stylegan3/train.py \
+    --data=datasets/skymangler_skygan_cache/envmap_skylatlong/export_TRAIN.csv \
+    --resolution=256 --gamma=2 \
+    --cfg=stylegan3-t --gpus=2 \
+    --batch=32 --batch-gpu=4 --tick=1 --snap=1 \
+    --outdir=$OUTPUT_DIR \
+    --metrics='fid50k_full' \
+    --mirror=0 \
+    --aug-ada-xflip=0 \
+    --aug-ada-rotate90=0 \
+    --aug-ada-xint=0 \
+    --aug-ada-scale=0 \
+    --aug-ada-rotate=1 \
+    --aug-ada-aniso=0 \
+    --aug-ada-xfrac=0 \
+    --normalize-azimuth=True \
+    --use-encoder=True \
+    "

@@ -110,7 +110,7 @@ date
 echo "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"
 echo "################################################################"
 
-FILE_LOCK=".drac/lock_${SLURM_JOB_ID}_${SLURM_JOB_NAME}.txt"
+FILE_LOCK=".drac_locks/lock_${SLURM_JOB_ID}_${SLURM_JOB_NAME}.txt"
 echo "Waiting for all tasks to start..."
 echo $SLURM_PROCID >> $FILE_LOCK
 until [ $(cat $FILE_LOCK | wc -l) -ge $SLURM_NTASKS ]
