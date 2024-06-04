@@ -4,7 +4,7 @@
 
     distance_to_clouds
         RESxRES array ... a stereographic-projected distance to a plane at 5000 m (approximating clouds position), clipped
-    
+
     polar_distance
         phi ... azimuth: [0..2pi]
         theta ... elevation: [-pi/2..pi/2], positive === Sun is above horizon
@@ -23,7 +23,7 @@ class SecondaryChannels:
         result[...,0] = 2*x/denom
         result[...,1] = 2*y/denom
         result[...,2] = (1-(x*x+y*y))/denom
-        
+
         mask = (x*x + y*y) > 1.0
         result[mask,:] = 0.0
         return result
@@ -53,9 +53,11 @@ class SecondaryChannels:
         return (img - 1).astype(np.float32) # values from [-1,1]
 
 
-    def __init__(self, resolution):
-        print('secondary_channels init', resolution)
+    def __init__(self, resolution, border=0):
+        resolution = resolution - (2*border)
         self.resolution = resolution
+        # print('secondary_channels init', resolution)
+
 
         x_coords = np.linspace(-1., 1., resolution)
         y_coords = np.linspace(-1., 1., resolution)
@@ -78,4 +80,3 @@ class SecondaryChannels:
         sun, sun_direction, np.linalg.norm(sun_direction)
 
         #polar_distance(phi, theta, sun_phi, sun_theta)-1 # distribute values from [-1,1]
-        

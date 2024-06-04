@@ -85,10 +85,13 @@ def report_metric(result_dict, run_dir=None, snapshot_pkl=None):
 
 @register_metric
 def fid50k_full(opts):
+    print('\n\nINIT fid50k_full\n\n')
+
     opts.dataset_kwargs.update(max_size=None, xflip=False)
     fid = frechet_inception_distance.compute_fid(opts, max_real=None, num_gen=35424) # TODO or just 35424 ... 35425 rounded down to a multiple of 16 (the generation batch size - is 64??? or 16???)
     #print('DEBUG: limited to 16 items')
     #fid = frechet_inception_distance.compute_fid(opts, max_real=None, num_gen=16)
+    print('\n\nRAN fid50k_full\n\n')
     return dict(fid50k_full=fid)
 
 @register_metric

@@ -168,7 +168,7 @@ time srun --output="$OUTPUT_DIR/sbatch_%x_id%j_n%n_t%t.txt" bash -c " \
     --cfg=stylegan3-t --gpus=2 \
     --batch=32 --batch-gpu=4 --tick=1 --snap=1 \
     --outdir=$OUTPUT_DIR \
-    --metrics=fid50k_full \
+    --metrics=none \
     --mirror=0 \
     --aug-ada-xflip=0 \
     --aug-ada-rotate90=0 \
@@ -182,8 +182,9 @@ time srun --output="$OUTPUT_DIR/sbatch_%x_id%j_n%n_t%t.txt" bash -c " \
     "
 
 # DEFAULT OPTIONS:
-# @click.option('--resume',       help='Resume from given network pickle', metavar='[PATH|URL]',  type=str)
-
+# --resume=/mnt/proj2/open-26-1/out/skygan256/00103-stylegan3-t-auto_processed_20230405_1727-gpus8-batch32-gamma2/network-snapshot-008733.pkl \
+# --resume-augment-pipe=True \
+# --metrics='fid50k_full' # For TESTING ONLY \
 
 echo ""
 echo "################################################################"

@@ -73,9 +73,9 @@ def setup_snapshot_image_grid(training_set, random_seed=0):
 
     # Load data.
     images, labels = zip(*[training_set[i] for i in grid_indices])
-    
+
     images = stretch(np.stack(images))
-    
+
     return (gw, gh), images, np.stack(labels)
 
 #----------------------------------------------------------------------------
@@ -94,7 +94,7 @@ def save_image_grid(img, fname, drange, grid_size=[1,1], hdr=False):
     img = img.reshape([gh, gw, C, H, W])
     img = img.transpose(0, 3, 1, 4, 2) # gh, H, gw, W, C
     img = img.reshape([gh * H, gw * W, C])
-    
+
     if hdr:
         saved_successfully = cv2.imwrite(fname, img[:1024, :1024, ::-1]) # crop and RGB -> BGR
         assert saved_successfully
@@ -116,7 +116,7 @@ def run_E_and_G(E_ema, G_ema, clear_images, clear_labels, batch_gpu, device, gri
     #training_stats.report('Extra/run_E_and_G/clear_images_min', clear_images.min())
     #training_stats.report('Extra/run_E_and_G/clear_images_mean', clear_images.mean())
     #training_stats.report('Extra/run_E_and_G/clear_images_max', clear_images.max())
-    
+
     if use_encoder:
         if dump_images:
             ci = torch.Tensor(clear_images).to(device).split(batch_gpu)[0][:1].cpu().numpy()
@@ -142,7 +142,7 @@ def run_E_and_G(E_ema, G_ema, clear_images, clear_labels, batch_gpu, device, gri
         bottlenecks = (None for i in range(len(grid_z)))
 
     images = torch.cat([G_ema(z=z, c=c, injected_bottlenecks=b, noise_mode='const').cpu() for z, c, b in zip(grid_z, grid_c, bottlenecks)]).numpy()
-    
+
     if dump_images:
         save_image_grid(training.utils.generator_output_extract_clear(images[:1]), os.path.join(run_dir, 'tmp_training_clears_rec_init.png'), drange=[-1,1])
 
@@ -288,7 +288,7 @@ def training_loop(
         ('EG', [E, G], [E_opt_kwargs, G_opt_kwargs], 1, EG_reg_interval),
         ('D', [D], [D_opt_kwargs], 1, D_reg_interval)
         ]:
-    
+
         if reg_interval is None:
             print(name, 'will merge "main" and "reg" into "both"')
             #opt = dnnlib.util.construct_class_by_name(params=module.parameters(), **opt_kwargs) # subclass of torch.optim.Optimizer
@@ -337,7 +337,7 @@ def training_loop(
 
         save_image_grid(clear_images_RGB, os.path.join(run_dir, 'clears.png'), drange=[-1,1], grid_size=grid_size)
         save_image_grid(clear_images_extra, os.path.join(run_dir, 'clears_extra.png'), drange=[-1,1], grid_size=grid_size)
-        
+
         grid_z = torch.randn([labels.shape[0], G.z_dim], device=device).split(batch_gpu)
         grid_c = torch.from_numpy(labels).to(device).split(batch_gpu)
 
@@ -366,6 +366,7 @@ def training_loop(
         stats_jsonl = open(os.path.join(run_dir, 'stats.jsonl'), 'wt')
         try:
             import torch.utils.tensorboard as tensorboard
+            # Warning! Requires pip install setuptools==59.5.0
             stats_tfevents = tensorboard.SummaryWriter(run_dir)
         except ImportError as err:
             print('Skipping tfevents export:', err)
@@ -412,11 +413,11 @@ def training_loop(
                 opt.zero_grad(set_to_none=True)
             for module in phase.modules:
                 module.requires_grad_(True)
-            
+
             for real_img, clear_img, real_c, gen_z, gen_c in zip(phase_real_img, phase_clear_img, phase_real_c, phase_gen_z, phase_gen_c):
                 #print('Accumulate gradients...')
                 loss.accumulate_gradients(phase=phase.name, real_img=real_img, clear_img=clear_img, real_c=real_c, gen_z=gen_z, gen_c=gen_c, gain=phase.interval, cur_nimg=cur_nimg)
-            
+
             for module in phase.modules:
                 module.requires_grad_(False)
 
@@ -439,18 +440,18 @@ def training_loop(
                         for name, param, grad in zip(param_names, params, grads):
                             #print(f'param {param.min():.5f} {param.mean():.5f} {param.max():.5f} grad {grad.min():.5f} {grad.mean():.5f} {grad.max():.5f}')
 
-                            
+
                             #training_stats.report('Extra/'+phase.name+'/param_min', param.min())
                             #training_stats.report('Extra/'+phase.name+'/param_mean', param.mean())
                             training_stats.report('Extra/'+phase.name+'/param_abs_mean_'+name, param.abs().mean())
                             #training_stats.report('Extra/'+phase.name+'/param_max', param.max())
-                            
+
                             #training_stats.report('Extra/'+phase.name+'/grad_min', grad.min())
                             #training_stats.report('Extra/'+phase.name+'/grad_mean', grad.mean())
                             training_stats.report('Extra/'+phase.name+'/grad_abs_mean', grad.abs().mean())
                             #training_stats.report('Extra/'+phase.name+'/grad_abs_mean_'+name, grad.abs().mean())
                             #training_stats.report('Extra/'+phase.name+'/grad_max', grad.max())
-                            
+
 
                             param.grad = grad.reshape(param.shape)
                 for opt in phase.opts:
@@ -471,7 +472,7 @@ def training_loop(
                 p_ema.copy_(p.lerp(p_ema, ema_beta))
             for b_ema, b in zip(G_ema.buffers(), G.buffers()):
                 b_ema.copy_(b)
-        
+
         #print('Update E_ema.')
         # Update E_ema. (exponential moving average)
         with torch.autograd.profiler.record_function('Eema'):

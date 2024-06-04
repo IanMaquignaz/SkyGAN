@@ -236,7 +236,7 @@ def compute_feature_stats_for_dataset(opts, detector_url, detector_kwargs, rel_l
     for images, _labels in torch.utils.data.DataLoader(dataset=dataset, sampler=item_subset, batch_size=batch_size, **data_loader_kwargs):
         if images.shape[1] == 1:
             images = images.repeat([1, 3, 1, 1])
-        
+
         images = training.training_loop.stretch(images).to(opts.device)#.split(batch_gpu)
 
         images = torch.from_numpy(training.utils.invert_log_transform(images.cpu().numpy())).to(opts.device)
@@ -262,10 +262,11 @@ def compute_feature_stats_for_dataset(opts, detector_url, detector_kwargs, rel_l
 #----------------------------------------------------------------------------
 
 def compute_feature_stats_for_generator(opts, detector_url, detector_kwargs, rel_lo=0, rel_hi=1, batch_size=72, batch_gen=8, clear_data_loader_kwargs=None, **stats_kwargs):
+    print('clear_dataset_kwargs=', opts.clear_dataset_kwargs)
     clear_dataset = dnnlib.util.construct_class_by_name(**opts.clear_dataset_kwargs)
     if clear_data_loader_kwargs is None:
         clear_data_loader_kwargs = dict(pin_memory=True, num_workers=3, prefetch_factor=2)
-    
+
 
     if batch_gen is None:
         batch_gen = min(batch_size, 4)
@@ -330,7 +331,7 @@ def compute_feature_stats_for_generator(opts, detector_url, detector_kwargs, rel
         images = torch.cat(images)
         if images.shape[1] == 1:
             images = images.repeat([1, 3, 1, 1])
-        
+
         #grid_size=[4,4]
         #training.training_loop.save_image_grid(images[:16,...].cpu().numpy(), 'metric_generator.png', [0, 255], grid_size=grid_size)
         #exit(123)

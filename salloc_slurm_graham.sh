@@ -12,6 +12,9 @@ ENV_NAME="ENV_SKYGAN"
 CACHE_DIR=datasets/skymangler_skygan_cache/cache
 OUTPUT_DIR=output_SkyGAN
 
+# Clear the cache
+rm -rf $CACHE_DIR/diskcache_ClearSkyDataset/*
+echo "Cleared the cache"
 
 ### ------------------------------------------------------------------------------ ###
 ##------------------------##
@@ -142,10 +145,10 @@ srun --jobid $JOB_ID \
     python -u src/stylegan3/train.py \
     --data=datasets/skymangler_skygan_cache/envmap_skylatlong/export_TRAIN.csv \
     --resolution=256 --gamma=2 \
-    --cfg=stylegan3-t --gpus=2 \
+    --cfg=stylegan3-t --gpus=1 \
     --batch=32 --batch-gpu=4 --tick=1 --snap=1 \
     --outdir=$OUTPUT_DIR \
-    --metrics='fid50k_full' \
+    --metrics=none \
     --mirror=0 \
     --aug-ada-xflip=0 \
     --aug-ada-rotate90=0 \
@@ -157,3 +160,12 @@ srun --jobid $JOB_ID \
     --normalize-azimuth=True \
     --use-encoder=True \
     "
+
+# TEST
+    # --aug-ada-rotate=1 \
+    # --normalize-azimuth=True \
+
+
+# --resume=/mnt/proj2/open-26-1/out/skygan256/00103-stylegan3-t-auto_processed_20230405_1727-gpus8-batch32-gamma2/network-snapshot-008733.pkl \
+# --resume-augment-pipe=True \
+# --metrics='fid50k_full' \

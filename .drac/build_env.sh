@@ -51,7 +51,8 @@ source $SLURM_TMPDIR/$ENV_NAME/bin/activate
 export PIP_REQUIRE_VIRTUALENV=1
 
 # Upgrade pip
-$PYTHON -m pip install --no-index --upgrade pip setuptools wheel
+# Warning setuptools==59.5.0 is required for torch.utils.tensorboard!
+$PYTHON -m pip install --no-index --upgrade pip 'setuptools==59.5.0' wheel
 
 # 1. Fastest & Most Reliable Source
 # Install dependencies (internal; --no-index searches computecanada)
@@ -74,6 +75,7 @@ $PYTHON -m pip install --compile -e research-utils/
 $PYTHON -m pip install --compile -e skylibs/
 
 $PYTHON -m pip install --compile -e blender-runner/
+
 $PYTHON -m pip install --compile -e Parametric_SkyModels/
 
 # Save modules
