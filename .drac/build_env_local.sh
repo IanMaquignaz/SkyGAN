@@ -12,7 +12,6 @@ echo "################################################################"
 #### CONSTANTS (SET ME!) ####
 ##-------------------------##
 
-DIR_LOGS="logs/"
 ENV_NAME="ENV_SKYGAN"
 
 # Prevent error when SLURM_TMPDIR is not defined.

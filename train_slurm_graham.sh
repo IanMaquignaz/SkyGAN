@@ -25,7 +25,7 @@ sbatch << EOT
 ###     "hours:minutes:seconds",
 ###     "days-hours", "days-hours:minutes"
 ###     "days-hours:minutes:seconds".
-#SBATCH --time="8:0:0"
+#SBATCH --time="7-0"
 
 ### ACCOUNT ###
 #SBATCH --account=def-jlalonde
@@ -46,7 +46,7 @@ sbatch << EOT
 ### HARDWARE ###
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64G
-#SBATCH --gres="gpu:p100:2"
+#SBATCH --gres="gpu:t4:4"
 
 ### OPTIONAL ###
 ## --exclusive to get the whole nodes exclusively for this job
@@ -108,7 +108,7 @@ echo -e "--- End Constants --- \n"
 # Old lock file may be present in the case of a reqeued job.
 
 # Remove lock file
-FILE_LOCK=".drac/lock_\${SLURM_JOB_ID}_\${SLURM_JOB_NAME}.txt"
+FILE_LOCK=".drac_locks/lock_\${SLURM_JOB_ID}_\${SLURM_JOB_NAME}.txt"
 if test -f \$FILE_LOCK ; then
     echo "Removing lock file: \$FILE_LOCK"
     rm \$FILE_LOCK
@@ -165,7 +165,7 @@ time srun --output="$OUTPUT_DIR/sbatch_%x_id%j_n%n_t%t.txt" bash -c " \
     python -u src/stylegan3/train.py \
     --data=datasets/skymangler_skygan_cache/envmap_skylatlong/export_TRAIN.csv \
     --resolution=256 --gamma=2 \
-    --cfg=stylegan3-t --gpus=2 \
+    --cfg=stylegan3-t --gpus=4 \
     --batch=32 --batch-gpu=4 --tick=1 --snap=1 \
     --outdir=$OUTPUT_DIR \
     --metrics=none \
@@ -221,7 +221,6 @@ echo "################################################################"
 ##------------------------##
 
 # Remove lock file
-FILE_LOCK=".drac/lock_\${SLURM_JOB_ID}_\${SLURM_JOB_NAME}.txt"
 if test -f \$FILE_LOCK ; then
     echo "Removing lock file: \$FILE_LOCK"
     rm \$FILE_LOCK
