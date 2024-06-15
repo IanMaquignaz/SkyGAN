@@ -166,7 +166,7 @@ time srun --output="$OUTPUT_DIR/sbatch_%x_id%j_n%n_t%t.txt" bash -c " \
     --data=datasets/skymangler_skygan_cache/envmap_skylatlong/export_TRAIN.csv \
     --resolution=256 --gamma=2 \
     --cfg=stylegan3-t --gpus=4 \
-    --batch=32 --batch-gpu=4 --tick=1 --snap=1 \
+    --batch=32 --batch-gpu=4 --tick=5 --snap=5 \
     --outdir=$OUTPUT_DIR \
     --metrics=none \
     --mirror=0 \

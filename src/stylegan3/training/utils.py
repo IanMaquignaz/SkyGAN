@@ -1,6 +1,10 @@
 import numpy as np
-from torch_utils import training_stats
-import dnnlib
+try:
+    from torch_utils import training_stats
+    import dnnlib
+except:
+    # from ..torch_utils import training_stats # Not used
+    from .. import dnnlib
 
 # expects shape in CHW
 def circular_mask(shape):

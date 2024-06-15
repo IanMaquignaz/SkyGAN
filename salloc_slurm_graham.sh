@@ -9,12 +9,8 @@ DIR_LOGS="logs"
 ENV_NAME="ENV_SKYGAN"
 
 # Training
-CACHE_DIR=datasets/skymangler_skygan_cache/cache
+CACHE_DIR=datasets/skymangler_skygan_cache/cache_salloc
 OUTPUT_DIR=output_SkyGAN
-
-# Clear the cache
-rm -rf $CACHE_DIR/diskcache_ClearSkyDataset/*
-echo "Cleared the cache"
 
 ### ------------------------------------------------------------------------------ ###
 ##------------------------##
