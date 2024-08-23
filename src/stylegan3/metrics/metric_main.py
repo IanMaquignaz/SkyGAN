@@ -84,6 +84,37 @@ def report_metric(result_dict, run_dir=None, snapshot_pkl=None):
 # Recommended metrics.
 
 @register_metric
+def export_full(opts):
+    # opts.dataset_kwargs.update(max_size=None, xflip=False)
+    # metric_utils.export_feature_for_generator(opts=opts)
+
+    # Export TEST Images
+    path = "datasets/skymangler_skygan_cache/envmap_skylatlong/export_TEST.csv"
+    opts.dataset_kwargs.update(max_size=None, xflip=False)
+    opts.clear_dataset_kwargs.update(max_size=None, xflip=False, path=path)
+    metric_utils.export_feature_for_generator(opts=opts, subfolder="TEST")
+
+    # Export EVAL Images
+    path = "datasets/skymangler_skygan_cache/envmap_skylatlong/export_EVALGRID.csv"
+    opts.dataset_kwargs.update(max_size=None, xflip=False)
+    opts.clear_dataset_kwargs.update(max_size=None, xflip=False, path=path)
+    metric_utils.export_feature_for_generator(opts=opts, subfolder="EVALGRID")
+
+    # Export EVAL DEMO Images
+    path = "datasets/skymangler_skygan_cache/envmap_skylatlong/export_EVALGRID_DEMO.csv"
+    opts.dataset_kwargs.update(max_size=None, xflip=False, path=path)
+    opts.clear_dataset_kwargs.update(max_size=None, xflip=False, path=path)
+    metric_utils.export_feature_for_generator(opts=opts, subfolder="EVALGRID_DEMO")
+    return dict(export_full=0.)
+
+
+@register_metric
+def fid_full(opts):
+    opts.dataset_kwargs.update(max_size=None, xflip=False)
+    fid = frechet_inception_distance.compute_fid(opts, max_real=None, num_gen=None)
+    return dict(fid_full=fid)
+
+@register_metric
 def fid50k_full(opts):
     print('\n\nINIT fid50k_full\n\n')
 

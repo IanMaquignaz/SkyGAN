@@ -1,4 +1,5 @@
 torch<=1.9.1
+torchvision
 tqdm
 requests
 omegaconf
@@ -8,7 +9,6 @@ matplotlib
 torchmetrics
 imageio
 scikit_image
-pybind11[global]
 numpy
 pillow
 diskcache

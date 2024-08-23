@@ -3,6 +3,7 @@ __pycache__
 .drac_locks/
 output_SkyGAN
 output_SkyGAN_noClearSky
+output_metrics
 src/stylegan3/out
 src/stylegan3/_screenshots
 core

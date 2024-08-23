@@ -18,11 +18,20 @@ import numpy as np
 import torch
 import dnnlib
 import training.training_loop
+import training.loss
+import training.utils
+
+# Custom
+from pathlib import Path
+from .metrics_HDR import get_metrics_test
+from utils_os import folder_flush
+from utils_cv.io.opencv import save_image as cv_save_image
+
 
 #----------------------------------------------------------------------------
 
 class MetricOptions:
-    def __init__(self, E=None, E_kwargs={}, G=None, G_kwargs={}, dataset_kwargs={}, clear_dataset_kwargs={}, num_gpus=1, rank=0, device=None, progress=None, cache=True):
+    def __init__(self, E=None, E_kwargs={}, G=None, G_kwargs={}, dataset_kwargs={}, clear_dataset_kwargs={}, num_gpus=1, rank=0, device=None, progress=None, cache=True, run_dir=None, use_encoder=True):
         assert 0 <= rank < num_gpus
         self.E              = E
         self.E_kwargs       = dnnlib.EasyDict(E_kwargs)
@@ -35,6 +44,9 @@ class MetricOptions:
         self.device         = device if device is not None else torch.device('cuda', rank)
         self.progress       = progress.sub() if progress is not None and rank == 0 else ProgressMonitor()
         self.cache          = cache
+        self.run_dir        = run_dir
+        self.use_encoder    = use_encoder
+
 
 #----------------------------------------------------------------------------
 
@@ -67,7 +79,8 @@ def iterate_random_labels(opts, batch_size):
         dataset = dnnlib.util.construct_class_by_name(**opts.dataset_kwargs)
         while True:
             c = [dataset.get_label(np.random.randint(len(dataset))) for _i in range(batch_size)]
-            c = torch.from_numpy(np.stack(c)).pin_memory().to(opts.device)
+            # c = torch.from_numpy(np.stack(c)).pin_memory().to(opts.device)
+            c = torch.stack(c).pin_memory().to(opts.device)
             yield c
 
 #----------------------------------------------------------------------------
@@ -197,6 +210,17 @@ class ProgressMonitor:
 
 #----------------------------------------------------------------------------
 
+def to_LDR(img, drange=(0,1)):
+    # See training_loop.save_image_grid
+    lo, hi = drange
+    img = np.asarray(img, dtype=np.float32)
+    img = (img - lo) / (hi - lo) # fix range
+    # img = np.rint(
+    #     training.training_loop.linear2srgb(img)*255
+    # ).clip(0, 255).astype(np.uint8) # to LDR
+    img = training.training_loop.linear2srgb(img).clip(0, 1).astype(np.float32) # to LDR
+    return img
+
 def compute_feature_stats_for_dataset(opts, detector_url, detector_kwargs, rel_lo=0, rel_hi=1, batch_size=64, data_loader_kwargs=None, max_items=None, **stats_kwargs):
     dataset = dnnlib.util.construct_class_by_name(**opts.dataset_kwargs)
     if data_loader_kwargs is None:
@@ -237,15 +261,18 @@ def compute_feature_stats_for_dataset(opts, detector_url, detector_kwargs, rel_l
         if images.shape[1] == 1:
             images = images.repeat([1, 3, 1, 1])
 
+         # [0, 1] -> [-1, 1]
         images = training.training_loop.stretch(images).to(opts.device)#.split(batch_gpu)
 
-        images = torch.from_numpy(training.utils.invert_log_transform(images.cpu().numpy())).to(opts.device)
-        #print('images', images.min(), images.mean(), images.max())
-        images = (images * 255).clamp(0, 255).to(torch.uint8)
+        # THIS IS WRONG!
+        # IMAGES SHOULD BE TONEMAPPED FOR METRICS AND FID ACCEPTS [0,1]
+        # images = torch.from_numpy(training.utils.invert_log_transform(images.cpu().numpy())).to(opts.device)
+        # images = (images * 255).clamp(0, 255).to(torch.uint8)
 
-        #grid_size=[4,4]
-        #training.training_loop.save_image_grid(images[:16,...].cpu().numpy(), 'metric_dataset.png', [0, 255], grid_size=grid_size)
-        #exit(123)
+        images = training.training_loop.unstretch(images).to(opts.device)
+        images = training.utils.invert_log_transform(images.cpu().numpy())
+        images = torch.from_numpy(training.utils.fix_gamma(images)).to(opts.device)
+        # images = images.clamp(0,1)
 
         features = detector(images.to(opts.device), **detector_kwargs)
         stats.append_torch(features, num_gpus=opts.num_gpus, rank=opts.rank)
@@ -280,9 +307,11 @@ def compute_feature_stats_for_generator(opts, detector_url, detector_kwargs, rel
     #c_iter = iterate_random_labels(opts=opts, batch_size=batch_gen)
 
     # Initialize.
+    if stats_kwargs['max_items'] == None:
+        dataset = dnnlib.util.construct_class_by_name(**opts.dataset_kwargs)
+        stats_kwargs['max_items'] = len(dataset)
     stats = FeatureStats(**stats_kwargs)
     assert stats.max_items is not None
-    num_items = stats.max_items
 
     #item_subset = [(i * opts.num_gpus + opts.rank) % num_items for i in range((num_items - 1) // opts.num_gpus + 1)] # ?
     clear_data_loader = iter(torch.utils.data.DataLoader(
@@ -300,6 +329,7 @@ def compute_feature_stats_for_generator(opts, detector_url, detector_kwargs, rel
         images = []
         #print("batch_size // batch_gen", batch_size // batch_gen)
         for _i in range(batch_size // batch_gen):
+            print("Images=", len(images))
             #print("stats.num_items, stats.max_items", stats.num_items, stats.max_items)
             z = torch.randn([batch_gen, G.z_dim], device=opts.device)
             clear_img, clear_c = next(clear_data_loader)
@@ -314,18 +344,34 @@ def compute_feature_stats_for_generator(opts, detector_url, detector_kwargs, rel
             # Inject and encode
             img_fake, img_clear_rec, _gen_ws = training.loss.run_EG(
                 z=z, c=clear_c, clear_img=clear_img,
-                use_encoder=True, E=E, G=G,
+                use_encoder=opts.use_encoder, E=E, G=G,
                 style_mixing_prob=0, mask=mask, update_emas=False,
                 **opts.E_kwargs, **opts.G_kwargs # TODO E/G_kwargs - pass to E/G respectively, not here?
             )
 
+            # THERE IS SOMETHING VERY WRONG HERE.
             #print('img_fake.shape', img_fake.shape)
+            # img_fake = training.training_loop.unstretch(img_fake)
+            # img_fake = training.utils.invert_log_transform(img_fake.cpu().numpy())
+            # img_fake = torch.from_numpy(training.utils.fix_gamma(img_fake)).to(opts.device)
+            # # img_fake = img_fake.clamp(0,1)
 
-            img_fake = torch.from_numpy(training.utils.invert_log_transform(img_fake.cpu().numpy())).to(opts.device)
-            # TODO invert_log_transform -> [0,1+]
-            #print('img_fake', img_fake.min(), img_fake.mean(), img_fake.max())
-            img_fake = (img_fake * 255).clamp(0, 255).to(torch.uint8)
-            images.append(img_fake)
+            # # TODO invert_log_transform -> [0,1+]
+            # #print('img_fake', img_fake.min(), img_fake.mean(), img_fake.max())
+            # # img_fake = (img_fake * 255).clamp(0, 255).to(torch.uint8)
+
+            # NP Linear HDR (maybe?)
+            img_fake = training.utils.invert_log_transform(
+                img_fake.detach().clone().cpu().numpy()
+            )
+            img_real = training.utils.invert_log_transform(
+                img_real.detach().clone().cpu().numpy()
+            )
+            # Torch LDR
+            img_fake_LDR = torch.from_numpy(
+                to_LDR(img_fake.copy())
+            ).to(opts.device)
+            images.append(img_fake_LDR)
 
         #print('len(images)', len(images))
         images = torch.cat(images)
@@ -341,5 +387,187 @@ def compute_feature_stats_for_generator(opts, detector_url, detector_kwargs, rel
         print("stats.num_items, stats.max_items", stats.num_items, stats.max_items)
         progress.update(stats.num_items)
     return stats
+
+#----------------------------------------------------------------------------
+
+
+def export_feature_for_generator(opts, subfolder="TEST"):
+    # Cleanup
+    folder = os.path.join(opts.run_dir,subfolder)
+    Path(folder).mkdir(exist_ok=True)
+    folder_flush(os.path.join(opts.run_dir,subfolder), verbose=True)
+    print("Metrics will be output to:", opts.run_dir)
+    # export_bool = False if subfolder == "TEST" else True
+    export_bool = True # Needed for manual evaluation.
+
+    # Setup Dataloader.
+    print("Initializing HDRDB...")
+    batch_size = 1
+    dataset = dnnlib.util.construct_class_by_name(**opts.dataset_kwargs)
+    data_loader_kwargs = dict(pin_memory=True, num_workers=3, prefetch_factor=2)
+    num_items = len(dataset)
+    item_subset = [(i * opts.num_gpus + opts.rank) % num_items for i in range((num_items - 1) // opts.num_gpus + 1)]
+    data = torch.utils.data.DataLoader(dataset=dataset, sampler=item_subset, batch_size=batch_size, shuffle=False, **data_loader_kwargs)
+    print("Initializing HDRDB... Complete!")
+
+    print("Initializing ClearSkies...")
+    clear_dataset = dnnlib.util.construct_class_by_name(**opts.clear_dataset_kwargs)
+    clear_data_loader_kwargs = dict(pin_memory=True, num_workers=3, prefetch_factor=2)
+    data_clear = torch.utils.data.DataLoader(dataset=clear_dataset, sampler=item_subset, batch_size=batch_size, shuffle=False, **clear_data_loader_kwargs)
+    print("Initializing ClearSkies... Complete!")
+
+    # Setup generator and labels.
+    print("Initializing model...")
+    E = copy.deepcopy(opts.E).eval().requires_grad_(False).to(opts.device)
+    G = copy.deepcopy(opts.G).eval().requires_grad_(False).to(opts.device)
+    mask = torch.from_numpy(training.utils.circular_mask((G.img_channels, G.img_resolution, G.img_resolution)))
+    print("Initializing model... Complete!")
+
+    # Setup Metrics.
+    print("Initializing metrics...")
+    metrics_cLDR, metrics_HDR = get_metrics_test(
+        shape = opts.dataset_kwargs.resolution,
+        envmap_maskBorder=torch.logical_not(mask[0].detach().clone().bool().squeeze()).to(opts.device),
+        envmap_maskValid=mask[0].detach().clone().bool().squeeze().to(opts.device),
+        device=opts.device,
+    )
+
+    from utils_ml.metrics import EarthMoversDistance as EMD # EMD
+    emd = EMD(
+        bins=1000,
+        range=[0,20000],
+        mask=mask[0].detach().clone().bool().squeeze().to(opts.device),
+    ).to(opts.device)
+    print("Initializing metrics... Complete!")
+
+    # Main loop.
+    print("Starting export loop...")
+    for i, ((img_real, labels_c),(img_clear_real, clear_c)) in enumerate(zip(data, data_clear)):
+
+        print('Iteration:', i)
+        if img_real.shape[1] == 1:
+            img_real = img_real.repeat([1, 3, 1, 1])
+
+        # [0, 1] -> [-1, 1]
+        img_real = training.training_loop.stretch(img_real).to(opts.device)
+        img_clear_real = training.training_loop.stretch(img_clear_real).to(opts.device)
+
+        # Inject and encode
+        z = torch.randn([batch_size, G.z_dim], device=opts.device)
+        img_fake, img_clear_rec, _gen_ws = training.loss.run_EG(
+            z=z, c=clear_c, clear_img=img_clear_real,
+            use_encoder=opts.use_encoder, E=E, G=G,
+            style_mixing_prob=0, mask=mask, update_emas=False,
+            **opts.E_kwargs, **opts.G_kwargs # TODO E/G_kwargs - pass to E/G respectively, not here?
+        )
+
+        print(f"img_fake_out={img_fake.min()}, {img_fake.max()}, {img_fake.shape}")
+        print(f"img_real_out={img_real.min()}, {img_real.max()}, {img_real.shape}")
+
+        # NP Linear HDR (maybe?)
+        img_fake = training.utils.invert_log_transform(
+            img_fake.detach().clone().cpu().numpy()
+        )
+        img_real = training.utils.invert_log_transform(
+            img_real.detach().clone().cpu().numpy()
+        )
+
+        # Torch LDR
+        img_fake_LDR = torch.from_numpy(
+            to_LDR(img_fake.copy())
+        ).to(opts.device)
+        img_real_LDR = torch.from_numpy(
+            to_LDR(img_real.copy())
+        ).to(opts.device)
+        print(f"img_fake_LDR={img_fake_LDR.min()}, {img_fake_LDR.max()}, {img_fake_LDR.shape}")
+        print(f"img_real_LDR={img_real_LDR.min()}, {img_real_LDR.max()}, {img_real_LDR.shape}")
+
+        # Torch HDR
+        img_fake_HDR = torch.from_numpy(
+            img_fake.copy()
+        ).to(opts.device).clamp(min=0)
+        print(f"img_fake_HDR={img_fake_HDR.min()}, {img_fake_HDR.max()}, {img_fake_HDR.shape}")
+        img_real_HDR = torch.from_numpy(
+            img_real.copy()
+        ).to(opts.device).clamp(min=0)
+        print(f"img_real_HDR={img_real_HDR.min()}, {img_real_HDR.max()}, {img_real_HDR.shape}")
+        # labels_c = labels_c.to(opts.device)
+        # label = label.reshape(1,1,256,256)
+
+        # Export PNG
+        if export_bool:
+            # img_png = (img.detach().clone() * 127.5 + 128).clamp(0, 255).to(torch.uint8).squeeze()
+            cv_save_image(f"{folder}/{i:06}.png", img_fake_LDR.clone().squeeze(), PNG=True)
+            cv_save_image(f"{folder}/{i:06}_gt.png", img_real_LDR.clone().squeeze(), PNG=True)
+            cv_save_image(f"{folder}/{i:06}.exr", img_fake_HDR.clone().squeeze(), PNG=False)
+            cv_save_image(f"{folder}/{i:06}_gt.exr", img_real_HDR.detach().clone().squeeze(), PNG=False)
+
+        for k in metrics_cLDR.keys():
+            if 'KernelInceptionDistance' in k  or 'FrechetInceptionDistance' in k:
+                metrics_cLDR[k].update(img_real_LDR.detach().clone(), real=True)
+                metrics_cLDR[k].update(img_fake_LDR.detach().clone(), real=False)
+            elif 'InceptionScore' in k or 'CLIPImageQualityAssessment' in k:
+                if '_real' in k:
+                    metrics_cLDR[k].update(img_real_LDR.detach().clone())
+                else:
+                    metrics_cLDR[k].update(img_fake_LDR.detach().clone())
+            elif 'CLIPScore' in k :
+                raise NotImplementedError
+                # if '_real' in k:
+                #     metrics[k].update(real.detach().clone(), cliptext)
+                # else:
+                #     metrics[k].update(fake.detach().clone(), cliptext)
+            elif 'CLIPImageQualityAssessment' in k :
+                if 'real' in k:
+                    metrics_cLDR[k].update(img_real_LDR.detach().clone())
+                else:
+                    metrics_cLDR[k].update(img_fake_LDR.detach().clone())
+            else:
+                # SSIM, MS-SSIM,
+                metrics_cLDR[k].update(
+                    img_fake_LDR.detach().clone(),
+                    img_real_LDR.detach().clone(),
+                )
+
+        for k in metrics_HDR.keys(keep_base=True):
+            metrics_HDR[k].update(
+                img_fake_HDR.detach().clone(),
+                img_real_HDR.detach().clone(),
+            )
+        emd.update(
+            img_fake_HDR.detach().clone(),
+            img_real_HDR.detach().clone(),
+        )
+
+    # Metrics print results
+    result = emd.compute()
+    hist_error_sum = emd.plot_cummulative_histogram_error()
+    from torchvision.utils import save_image
+    save_image(hist_error_sum, f"{folder}/_hist_error_sum_.png")
+
+    #####################
+    ## Compute Metrics ##
+    #####################
+    metric_output = metrics_HDR.compute()
+    metric_output_cLDR = metrics_cLDR.compute()
+    for k in metric_output_cLDR.keys():
+        if 'KernelInceptionDistance' in k:
+            kid_mean, kid_std = metric_output[k]
+            metric_output['KID_mean'] = kid_mean
+            metric_output['KID_std'] = kid_std
+        elif 'InceptionScore' in k:
+            is_mean, is_std = metric_output[k]
+            tail = '_fake' if '_fake' in k else '_real'
+            metric_output['IS_mean'+tail] = is_mean
+            metric_output['IS_std'+tail] = is_std
+        elif 'CLIPImageQualityAssessment' in k:
+            CLIP_IQA = metric_output[k].mean()
+            tail = '_fake' if '_fake' in k else '_real'
+            metric_output['CLIP_IQA'+tail] = CLIP_IQA
+    metric_output["emd2"] = result
+
+    with open(f"{folder}/_metrics_.txt", 'a') as metrics_file:
+        for k in metric_output.keys():
+            metrics_file.write(f"{k}: {metric_output[k].cpu().item()}\n")
 
 #----------------------------------------------------------------------------

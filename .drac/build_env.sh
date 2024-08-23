@@ -32,7 +32,7 @@ module --force purge
 # or use 'module spider <your_package>'
 PYTHON_VERSION="3.9"
 PYTHON="python$PYTHON_VERSION"
-module load StdEnv/2020 gcc cuda opencv python/$PYTHON_VERSION
+module load StdEnv/2020 gcc rust/1.70.0 cuda opencv python/$PYTHON_VERSION
 # Warning!
 # Python3.9 is not compatible with StdEnv/2023
 

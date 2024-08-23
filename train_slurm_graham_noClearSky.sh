@@ -9,8 +9,7 @@ CREATE_ENV_LOCAL=true
 ENV_NAME="ENV_SKYGAN"
 
 # Training
-CACHE_DIR=datasets/skymangler_skygan_cache/cache_noClearSky
-OUTPUT_DIR=output_SkyGAN_noClearSky
+OUTPUT_DIR=output_SkyGAN_FID_noClearSky
 
 sbatch << EOT
 #!/bin/bash -l
@@ -156,13 +155,14 @@ echo "Environment will be sourced from \$ENV_ACTIVATE_PATH"
 
 
 # Run Model
+CACHE_DIR=\${SLURM_TMPDIR}/cache_SkyGAN_\${SLURM_JOB_ID}
 time srun --output="$OUTPUT_DIR/sbatch_%x_id%j_n%n_t%t.txt" bash -c " \
     \$ENV_COMMAND && \
     export TORCH_NCCL_BLOCKING_WAIT=1 && \
     export NCCL_DEBUG=INFO && \
     export PYTHONFAULTHANDLER=1 && \
-    CACHE_DIR=$CACHE_DIR DNNLIB_CACHE_DIR=$CACHE_DIR \
-    python -u src/stylegan3/train.py \
+    CACHE_DIR=\$CACHE_DIR DNNLIB_CACHE_DIR=\$CACHE_DIR \
+    python -u src/stylegan3/train_FID.py \
     --data=datasets/skymangler_skygan_cache/envmap_skylatlong/export_TRAIN.csv \
     --resolution=256 --gamma=2 \
     --cfg=stylegan3-t --gpus=4 \
@@ -179,6 +179,8 @@ time srun --output="$OUTPUT_DIR/sbatch_%x_id%j_n%n_t%t.txt" bash -c " \
     --aug-ada-xfrac=0 \
     --normalize-azimuth=True \
     --use-encoder=False \
+    --resume-augment-pipe=True \
+    --resume=output_SkyGAN_noClearSky/00002-stylegan3-t-export_TRAIN-gpus4-batch32-gamma2/network-snapshot-001281.pkl \
     "
 
 

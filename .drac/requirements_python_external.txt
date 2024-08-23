@@ -8,5 +8,5 @@ pytorch_fid
 torch-fidelity
 torchmetrics
 torchmetrics[image]
-torchmetrics[multimodal]
 opencv-python-headless
+pybind11[global]
