@@ -18,7 +18,7 @@ GLOBAL_COMMAND="\
 
 # Environment
 CREATE_ENV_LOCAL=true
-ENV_NAME="ENV_SkyGAN"
+ENV_NAME="ENV_SKYGAN"
 
 
 sbatch << EOT
@@ -152,7 +152,7 @@ echo "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"
 echo "#########################################################################"
 
 JOB_NAME=$JOB_NAME
-TAG="\${JOB_NAME}_\${SLURM_ARRAY_TASK_ID}"
+TAG="\${JOB_NAME}"
 
 if $CREATE_ENV_LOCAL; then
     ENV_ACTIVATE_PATH=\${SLURM_TMPDIR}/\${ENV_NAME}_LOCAL/bin/activate
@@ -188,15 +188,17 @@ echo "################################################################"
 # Run Model
 ABLATION_COMMAND=\$(sed -n "\${SLURM_ARRAY_TASK_ID}p" $ARRAY_FILE)
 CACHE_DIR=\${SLURM_TMPDIR}/cache_StyleGAN_\${SLURM_JOB_ID}
-time srun --output="output_metrics/\$TAG/%x_id%j_t%a_n%n_t%t.txt" bash -c " \
+time srun --output="output_metrics/%x_id%j_t%a_n%n_t%t.txt" bash -c " \
     \$ENV_COMMAND && \
     export TORCH_NCCL_BLOCKING_WAIT=1 && \
     export TORCH_DISTRIBUTED_DEBUG=DETAIL && \
     export NCCL_DEBUG=INFO && \
     export NCCL_ASYNC_ERROR_HANDLING=1 && \
     export PYTHONFAULTHANDLER=1 && \
+    export CACHE_DIR=datasets/skymangler_skygan_cache/cache && \
+    CACHE_DIR=\$CACHE_DIR DNNLIB_CACHE_DIR=\$CACHE_DIR \
     python -u src/stylegan3/calc_metrics.py \
-        --data=datasets/skymangler_skygan_cache/envmap_skylatlong/export_EVALGRID_DEMO.csv \
+        --data=datasets/skymangler_skygan_cache/envmap_skylatlong/export_TEST.csv \
         --gpus=1 \
         --mirror=0 \
         --metrics=export_full \

@@ -90,13 +90,13 @@ def export_full(opts):
 
     # Export TEST Images
     path = "datasets/skymangler_skygan_cache/envmap_skylatlong/export_TEST.csv"
-    opts.dataset_kwargs.update(max_size=None, xflip=False)
+    opts.dataset_kwargs.update(max_size=None, xflip=False, path=path)
     opts.clear_dataset_kwargs.update(max_size=None, xflip=False, path=path)
     metric_utils.export_feature_for_generator(opts=opts, subfolder="TEST")
 
     # Export EVAL Images
     path = "datasets/skymangler_skygan_cache/envmap_skylatlong/export_EVALGRID.csv"
-    opts.dataset_kwargs.update(max_size=None, xflip=False)
+    opts.dataset_kwargs.update(max_size=None, xflip=False, path=path)
     opts.clear_dataset_kwargs.update(max_size=None, xflip=False, path=path)
     metric_utils.export_feature_for_generator(opts=opts, subfolder="EVALGRID")
 
