@@ -4,3 +4,6 @@
 [submodule "libs/skymangler"]
 	path = libs/skymangler
 	url = git@github.com:IanMaquignaz/skymangler.git
+[submodule "libs/HDR-VDP"]
+	path = libs/HDR-VDP
+	url = git@github.com:IanMaquignaz/HDR-VDP.git
