@@ -35,6 +35,31 @@ import training.utils
 
 #----------------------------------------------------------------------------
 
+def get_circular_mask(shape, border=0):
+    # Skylibs
+    from envmap import EnvironmentMap
+
+    envmap_in_sll = EnvironmentMap(
+                shape,
+                'skylatlong'
+            )
+    x, y, z, envmap_in_sll_mask = envmap_in_sll.worldCoordinates()
+
+    # Trim the border
+    envmap_in_sll_mask[-30:] = False
+
+    # Get Sky-Angular Skydome (with reshape)
+    envmap_out_sa = EnvironmentMap(
+            np.expand_dims(envmap_in_sll_mask, axis=-1).astype(np.float32),
+            'skylatlong'
+        ).convertTo(
+            'skyangular',
+            order=0
+        )
+    x, y, z, envmap_out_sa_mask = envmap_out_sa.worldCoordinates()
+    return envmap_out_sa_mask.astype(bool)
+
+
 class Dataset(torch.utils.data.Dataset):
     def __init__(self,
         name,                   # Name of the dataset.
@@ -43,12 +68,14 @@ class Dataset(torch.utils.data.Dataset):
         use_labels  = False,    # Enable conditioning labels? False = label dimension is zero.
         xflip       = False,    # Artificially double the size of the dataset via x-flips. Applied after max_size.
         random_seed = 0,        # Random seed to use when applying max_size.
+        border = 30 # Border around skyangular skydome
     ):
         self._name = name
         self._raw_shape = list(raw_shape)
         self._use_labels = use_labels
         self._raw_labels = None
         self._label_shape = None
+        self.border = border
 
         # Apply max_size.
         self._raw_idx = np.arange(self._raw_shape[0], dtype=np.int64)
@@ -62,7 +89,8 @@ class Dataset(torch.utils.data.Dataset):
             self._raw_idx = np.tile(self._raw_idx, 2)
             self._xflip = np.concatenate([self._xflip, np.ones_like(self._xflip)])
 
-        self._mask = circular_mask(raw_shape[1:])
+        # self._mask = circular_mask(raw_shape[1:])
+        self._mask = get_circular_mask(raw_shape[-1], border=border)
 
     def _get_raw_labels(self):
         if self._raw_labels is None:
@@ -286,83 +314,24 @@ class ImageFolderDataset(Dataset):
         multiplier = self._all_multipliers[raw_idx]
         wanted_size = self._resolution
 
-        extension = fname.split('.')[-1]
+        assert fname.split('.')[-1] == 'exr'
+
+        image = load_HDRDB_envmap(fname)
 
         if self._normalize_azimuth:
-            rotated_fname = fname.replace(
-                '.' + extension,
-                '.rot_az180' + '.' + extension
-            )
-            if not os.path.isfile(rotated_fname):
-                print('rotating', fname, 'to sun_azimuth == 180 as', rotated_fname)
-                ori_sun_azimuth = self._all_azimuths[raw_idx]
-                assert extension == 'exr' # TODO png support?
-                # cv2.imwrite(
-                #     rotated_fname+'.tmp.'+extension,
-                #     self.rotate_image(
-                #         # cv2.imread(fname, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH),
-                #         load_HDRDB_envmap(fname),
-                #         180 - ori_sun_azimuth
-                #     )
-                # )
-                image = load_HDRDB_envmap(fname)
-                image = self.rotate_image(image, 180 - ori_sun_azimuth)
-                save_image(rotated_fname, image)
-                # save_image(rotated_fname+'.tmp.'+extension, image)
-                # os.rename(rotated_fname+'.tmp.'+extension, rotated_fname)
-
-            fname = rotated_fname
+            ori_sun_azimuth = self._all_azimuths[raw_idx]
+            normed_sun_azimuth = np.rad2deg(ori_sun_azimuth)+90 # to degrees
+            image = self.rotate_image(image, normed_sun_azimuth)
 
         if wanted_size is not None:
-            resized_fname = fname.replace(
-                '.' + extension,
-                '.resized' + str(wanted_size) + '.' + extension
-            )
+            image = cv2.resize(image, (wanted_size, wanted_size))
 
-            if not os.path.isfile(resized_fname):
-                print('resizing', fname, 'to', wanted_size, 'as', resized_fname)
+        if image.shape[2] == 4:
+            image = image[:,:,:3] # remove alpha channel if present
 
-                if extension == 'exr':
-                    #imageio.imwrite(resized_fname, cv2.resize(imageio.imread(fname), (wanted_size, wanted_size)))
-                    #imageio.imwrite(resized_fname.replace('.exr', '.png'), (imageio.imread(fname)[:,:,:3]*255).clip(0, 255).astype(np.uint8))
-                    # cv2.imwrite(
-                    #     resized_fname+'.tmp.'+extension,
-                    #     cv2.resize(
-                    #         # cv2.imread(fname, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH),
-                    #         load_HDRDB_envmap(fname),
-                    #         (wanted_size, wanted_size)
-                    #     )
-                    # )
-                    image = load_HDRDB_envmap(fname)
-                    image = cv2.resize(image, (wanted_size, wanted_size))
-                    save_image(resized_fname, image)
-                    # save_image(resized_fname+'.tmp.'+extension, image)
-                    # os.rename(resized_fname+'.tmp.'+extension, resized_fname)
-                else:
-                    raise("NOT IMPLEMENTED!")
-                    # TODO: this resizing is possibly incorrect - it does not work in linear colour space - we should convert it to linear, then resize, then back to the original space (assuming sRGB). But maybe it wouldn't make a noticable difference as the original was already LDR (discretised to 256 values)
-                    PIL.Image.open(fname)\
-                    .resize((wanted_size, wanted_size))\
-                    .save(resized_fname)
+        image *= multiplier
+        image = training.training_loop.unstretch(training.utils.log_transform(image)) # to roughly [0, 1+]
 
-            fname = resized_fname
-
-        with self._open_file(fname) as f:
-            if pyspng is not None and self._file_ext(fname) == '.png':
-                image = pyspng.load(f.read())
-            elif self._file_ext(fname) == '.exr':
-                # image = cv2.imread(fname, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)[:,:,::-1] # BGR -> RGB
-                image = load_HDRDB_envmap(fname)
-                if image.shape[2] == 4:
-                    image = image[:,:,:3] # remove alpha channel if present
-
-                image *= multiplier
-                image = training.training_loop.unstretch(training.utils.log_transform(image)) # to roughly [0, 1+]
-                #image = np.clip(image, 0, 1) # DEBUG
-
-                #print('image', image.min(), image.mean(), np.median(image), image.max())
-            else:
-                image = np.array(PIL.Image.open(f))
         #print('image.shape', image.shape)
         assert image.shape[0] == image.shape[1] # square
         if wanted_size is not None:
@@ -371,7 +340,102 @@ class ImageFolderDataset(Dataset):
         if image.ndim == 2:
             image = image[:, :, np.newaxis] # HW => HWC
         image = image.transpose(2, 0, 1) # HWC => CHW
-        return image
+        return image.astype(np.float32)
+
+    '''WARNING! Removed as the excessive IO created race conditions...'''
+    # def _load_raw_image(self, raw_idx):
+    #     fname = self._image_fnames[raw_idx]
+    #     multiplier = self._all_multipliers[raw_idx]
+    #     wanted_size = self._resolution
+
+    #     extension = fname.split('.')[-1]
+
+    #     if self._normalize_azimuth:
+    #         rotated_fname = fname.replace(
+    #             '.' + extension,
+    #             '.rot_az180' + '.' + extension
+    #         )
+    #         if not os.path.isfile(rotated_fname):
+    #             print('rotating', fname, 'to sun_azimuth == 180 as', rotated_fname)
+    #             ori_sun_azimuth = self._all_azimuths[raw_idx]
+    #             assert extension == 'exr' # TODO png support?
+    #             # cv2.imwrite(
+    #             #     rotated_fname+'.tmp.'+extension,
+    #             #     self.rotate_image(
+    #             #         # cv2.imread(fname, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH),
+    #             #         load_HDRDB_envmap(fname),
+    #             #         180 - ori_sun_azimuth
+    #             #     )
+    #             # )
+    #             image = load_HDRDB_envmap(fname)
+    #             image = self.rotate_image(image, 180 - ori_sun_azimuth)
+    #             save_image(rotated_fname, image)
+    #             # save_image(rotated_fname+'.tmp.'+extension, image)
+    #             # os.rename(rotated_fname+'.tmp.'+extension, rotated_fname)
+
+    #         fname = rotated_fname
+
+    #     if wanted_size is not None:
+    #         resized_fname = fname.replace(
+    #             '.' + extension,
+    #             '.resized' + str(wanted_size) + '.' + extension
+    #         )
+
+    #         if not os.path.isfile(resized_fname):
+    #             print('resizing', fname, 'to', wanted_size, 'as', resized_fname)
+
+    #             if extension == 'exr':
+    #                 #imageio.imwrite(resized_fname, cv2.resize(imageio.imread(fname), (wanted_size, wanted_size)))
+    #                 #imageio.imwrite(resized_fname.replace('.exr', '.png'), (imageio.imread(fname)[:,:,:3]*255).clip(0, 255).astype(np.uint8))
+    #                 # cv2.imwrite(
+    #                 #     resized_fname+'.tmp.'+extension,
+    #                 #     cv2.resize(
+    #                 #         # cv2.imread(fname, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH),
+    #                 #         load_HDRDB_envmap(fname),
+    #                 #         (wanted_size, wanted_size)
+    #                 #     )
+    #                 # )
+    #                 image = load_HDRDB_envmap(fname)
+    #                 image = cv2.resize(image, (wanted_size, wanted_size))
+    #                 save_image(resized_fname, image)
+    #                 # save_image(resized_fname+'.tmp.'+extension, image)
+    #                 # os.rename(resized_fname+'.tmp.'+extension, resized_fname)
+    #             else:
+    #                 raise("NOT IMPLEMENTED!")
+    #                 # TODO: this resizing is possibly incorrect - it does not work in linear colour space - we should convert it to linear, then resize, then back to the original space (assuming sRGB). But maybe it wouldn't make a noticable difference as the original was already LDR (discretised to 256 values)
+    #                 PIL.Image.open(fname)\
+    #                 .resize((wanted_size, wanted_size))\
+    #                 .save(resized_fname)
+
+    #         fname = resized_fname
+
+    #     with self._open_file(fname) as f:
+    #         if pyspng is not None and self._file_ext(fname) == '.png':
+    #             raise Exception("NOT IMPLEMENTED.")
+    #             image = pyspng.load(f.read())
+    #         elif self._file_ext(fname) == '.exr':
+    #             # image = cv2.imread(fname, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)[:,:,::-1] # BGR -> RGB
+    #             image = load_HDRDB_envmap(fname)
+    #             if image.shape[2] == 4:
+    #                 image = image[:,:,:3] # remove alpha channel if present
+
+    #             image *= multiplier
+    #             image = training.training_loop.unstretch(training.utils.log_transform(image)) # to roughly [0, 1+]
+    #             #image = np.clip(image, 0, 1) # DEBUG
+
+    #             #print('image', image.min(), image.mean(), np.median(image), image.max())
+    #         else:
+    #             raise Exception("NOT IMPLEMENTED.")
+    #             image = np.array(PIL.Image.open(f))
+    #     #print('image.shape', image.shape)
+    #     assert image.shape[0] == image.shape[1] # square
+    #     if wanted_size is not None:
+    #         assert image.shape[0] == wanted_size
+
+    #     if image.ndim == 2:
+    #         image = image[:, :, np.newaxis] # HW => HWC
+    #     image = image.transpose(2, 0, 1) # HWC => CHW
+    #     return image
 
     def _load_raw_labels(self):
         fname = 'dataset.json'
@@ -396,10 +460,11 @@ ClearSkyDataset_mapping = diskcache.Cache(
     size_limit=100 * 2**30, # 100 GB
 )
 @ClearSkyDataset_mapping.memoize()
-def generate_clear_sky_image(resolution, azimuth, elevation):
+def generate_clear_sky_image(resolution, azimuth, elevation, border=0):
     # fixed parameters, optimized/fitted on "2019-08-10_1000_santa_cruz_villa_nuova/1K_EXR/IMG_2000_hdr.exr" using the "sky_image_generator_py.ipynb" notebook
     exposure, visibility, ground_albedo = -9.17947373e+00,  1.00012133e+02,  5.95418177e-03
 
+    # Generate
     model_img = sky_image_generator.generate_image(
         resolution,
         elevation,
@@ -407,7 +472,8 @@ def generate_clear_sky_image(resolution, azimuth, elevation):
         # elevation / 180 * np.pi, # elevation
         # math.fmod(360 + 270 - azimuth, 360) / 180 * np.pi, # azimuth
         visibility, # visibility (in km)
-        ground_albedo # ground albedo
+        ground_albedo, # ground albedo
+        border
     )
 
     exposure += 12 # exposure fix
@@ -416,13 +482,18 @@ def generate_clear_sky_image(resolution, azimuth, elevation):
     #print('img', img.min(), img.mean(), img.max())
     return img # [0, 1?]
 
-def generate_clear_sky_image_and_secondary_channels(resolution, secondary_channels, azimuth, elevation):
-    img = generate_clear_sky_image(resolution, azimuth, elevation) / 255
+def generate_clear_sky_image_and_secondary_channels(resolution, secondary_channels, azimuth, elevation, border=0):
+
+     # Correction
+    azimuth = azimuth+np.pi
+
+    img = generate_clear_sky_image(resolution, azimuth, elevation, border) / 255
 
     # img = img[..., ::-1] # RGB -> BGR # No longer needed
 
     # add secondary/guiding channels
-    polar_distance = (secondary_channels.polar_distance(secondary_channels.phi, secondary_channels.theta, math.fmod(360 + 270 - azimuth, 360) / 180 * np.pi, elevation / 180 * np.pi) + 1) / 2 # ([-1, 1] to [0, 1?])
+    polar_distance = (secondary_channels.polar_distance(secondary_channels.phi, secondary_channels.theta, azimuth, elevation) + 1) / 2 # ([-1, 1] to [0, 1?])
+    polar_distance = cv2.copyMakeBorder(polar_distance, border, border, border, border, borderType=cv2.BORDER_CONSTANT, value=0)
 
     img_with_secondary_channels = np.concatenate([
         img, # RGB
@@ -439,10 +510,13 @@ class ClearSkyDataset(Dataset):
         path,                   # Path to directory or zip or csv.
         resolution      = None, # Ensure specific resolution, None = highest available.
         normalize_azimuth = False, # set azimuth to 180 deg
+        border = 0, # Padding added around skyangular skydome
         **super_kwargs,         # Additional arguments for the Dataset base class.
     ):
         self._path = path
         self._resolution = resolution
+        # If we assume correct calibration, border is zero. Real Skydome does not go all the way down due to elevation.
+        self.border = border
 
         if self._file_ext(self._path) == '.csv':
             self._type = 'csv'
@@ -453,11 +527,14 @@ class ClearSkyDataset(Dataset):
             self._all_fnames = [file.replace('EXR', 'JPG').replace('_hdr','').replace('.exr','.jpg') for file in self._all_fnames]
 
             azimuths = self.csv['sun_azimuth'].to_numpy()
+
             if normalize_azimuth:
                 azimuths *= 0
-                azimuths += 180
+                # azimuths += 180
+                azimuths -=np.pi/2
 
-            azimuths = np.fmod(azimuths, 360)
+            # azimuths = np.fmod(azimuths, 360)
+            azimuths = np.fmod(azimuths, 2*np.pi)
 
             elevations = self.csv['sun_elevation'].to_numpy()
 
@@ -477,12 +554,12 @@ class ClearSkyDataset(Dataset):
         self._image_azimuths = [azimuth for idx, azimuth in enumerate(self._all_azimuths) if idx in filtered_indices]
         self._image_elevations = [elevation for idx, elevation in enumerate(self._all_elevations) if idx in filtered_indices]
 
-        self.secondary_channels = secondary_channels.SecondaryChannels(self._resolution)
+        self.secondary_channels = secondary_channels.SecondaryChannels(self._resolution, border=self.border)
 
         name = os.path.splitext(os.path.basename(self._path))[0]+'_clear'
         raw_shape = [len(self._image_fnames)] + list(self._load_raw_image(0).shape)
 
-        super().__init__(name=name, raw_shape=raw_shape, **super_kwargs)
+        super().__init__(name=name, raw_shape=raw_shape, border=border, **super_kwargs)
 
     @staticmethod
     def _file_ext(fname):
@@ -491,7 +568,7 @@ class ClearSkyDataset(Dataset):
     def _load_raw_image(self, raw_idx):
         azimuth = self._image_azimuths[raw_idx]
         elevation = self._image_elevations[raw_idx]
-        return generate_clear_sky_image_and_secondary_channels(self._resolution, self.secondary_channels, azimuth, elevation)
+        return generate_clear_sky_image_and_secondary_channels(self._resolution, self.secondary_channels, azimuth, elevation, border=self.border)
 
     def _load_raw_labels(self):
         return None

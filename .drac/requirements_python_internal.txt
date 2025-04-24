@@ -1,0 +1,17 @@
+torch<=1.9.1
+torchvision
+tqdm
+requests
+omegaconf
+Ninja
+autopep8
+matplotlib
+torchmetrics
+imageio
+scikit_image
+numpy
+pillow
+diskcache
+tensorboard
+tensorboardX
+click

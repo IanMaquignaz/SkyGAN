@@ -92,7 +92,8 @@ class PPLSampler(torch.nn.Module):
 #----------------------------------------------------------------------------
 
 def compute_ppl(opts, num_samples, epsilon, space, sampling, crop, batch_size):
-    vgg16_url = 'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/metrics/vgg16.pkl'
+    # vgg16_url = 'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/metrics/vgg16.pkl'
+    vgg16_url = 'file:///scratch/iamaq/SkyGAN/skymangler_skygan_cache/cache/downloads/vgg16.pkl'
     vgg16 = metric_utils.get_feature_detector(vgg16_url, num_gpus=opts.num_gpus, rank=opts.rank, verbose=opts.progress.verbose)
 
     # Setup sampler and labels.

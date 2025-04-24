@@ -26,6 +26,22 @@ from torch_utils.ops import conv2d_gradfix
 
 #----------------------------------------------------------------------------
 
+
+def init_dataset_kwargs(data, class_name='training.dataset.ImageFolderDataset', resolution=None, normalize_azimuth=False):
+    try:
+        dataset_kwargs = dnnlib.EasyDict(class_name=class_name, path=data, use_labels=True, max_size=None, xflip=False, resolution=resolution)
+        #print('dataset_kwargs', dataset_kwargs)
+        dataset_obj = dnnlib.util.construct_class_by_name(**dataset_kwargs) # Subclass of training.dataset.Dataset.
+        dataset_kwargs.resolution = dataset_obj.resolution # Be explicit about resolution.
+        dataset_kwargs.use_labels = dataset_obj.has_labels # Be explicit about labels.
+        dataset_kwargs.max_size = len(dataset_obj) # Be explicit about dataset size.
+        dataset_kwargs.normalize_azimuth = normalize_azimuth
+        return dataset_kwargs, dataset_obj.name
+    except IOError as err:
+        raise click.ClickException(f'--data: {err}')
+
+#----------------------------------------------------------------------------
+
 def subprocess_fn(rank, args, temp_dir):
     dnnlib.util.Logger(should_flush=True)
 
@@ -53,6 +69,7 @@ def subprocess_fn(rank, args, temp_dir):
 
     # Print network summary.
     G = copy.deepcopy(args.G).eval().requires_grad_(False).to(device)
+    E = copy.deepcopy(args.E).eval().requires_grad_(False).to(device)
     if rank == 0 and args.verbose:
         z = torch.empty([1, G.z_dim], device=device)
         c = torch.empty([1, G.c_dim], device=device)
@@ -63,8 +80,8 @@ def subprocess_fn(rank, args, temp_dir):
         if rank == 0 and args.verbose:
             print(f'Calculating {metric}...')
         progress = metric_utils.ProgressMonitor(verbose=args.verbose)
-        result_dict = metric_main.calc_metric(metric=metric, G=G, dataset_kwargs=args.dataset_kwargs,
-            num_gpus=args.num_gpus, rank=rank, device=device, progress=progress)
+        result_dict = metric_main.calc_metric(metric=metric, G=G, E=E, dataset_kwargs=args.dataset_kwargs, clear_dataset_kwargs=args.clear_dataset_kwargs,
+            num_gpus=args.num_gpus, rank=rank, device=device, progress=progress, run_dir=args.run_dir, use_encoder=args.use_encoder)
         if rank == 0:
             metric_main.report_metric(result_dict, run_dir=args.run_dir, snapshot_pkl=args.network_pkl)
         if rank == 0 and args.verbose:
@@ -93,8 +110,16 @@ def parse_comma_separated_list(s):
 @click.option('--mirror', help='Enable dataset x-flips  [default: look up]', type=bool, metavar='BOOL')
 @click.option('--gpus', help='Number of GPUs to use', type=int, default=1, metavar='INT', show_default=True)
 @click.option('--verbose', help='Print optional information', type=bool, default=True, metavar='BOOL', show_default=True)
+# Custom
+@click.option('--resolution',           help='What image resolution to use (resize the training set)', metavar='INT', type=click.IntRange(min=64), default=None, show_default=True)
+@click.option('--run_dir',         help='Output folder', metavar='PATH',  type=str, default=None)
+@click.option('--use_encoder',  help='Enable the injection of encoded clear sky images', metavar='BOOL', type=bool, default=True, show_default=True)
 
-def calc_metrics(ctx, network_pkl, metrics, data, mirror, gpus, verbose):
+def calc_metrics(
+    ctx,
+    network_pkl, metrics, data, mirror, gpus, verbose,
+    resolution, run_dir, use_encoder
+):
     """Calculate quality metrics for previous training run or pretrained network pickle.
 
     Examples:
@@ -129,7 +154,7 @@ def calc_metrics(ctx, network_pkl, metrics, data, mirror, gpus, verbose):
     dnnlib.util.Logger(should_flush=True)
 
     # Validate arguments.
-    args = dnnlib.EasyDict(metrics=metrics, num_gpus=gpus, network_pkl=network_pkl, verbose=verbose)
+    args = dnnlib.EasyDict(metrics=metrics, num_gpus=gpus, network_pkl=network_pkl, verbose=verbose, run_dir=run_dir, use_encoder=use_encoder)
     if not all(metric_main.is_valid_metric(metric) for metric in args.metrics):
         ctx.fail('\n'.join(['--metrics can only contain the following values:'] + metric_main.list_valid_metrics()))
     if not args.num_gpus >= 1:
@@ -140,14 +165,73 @@ def calc_metrics(ctx, network_pkl, metrics, data, mirror, gpus, verbose):
         ctx.fail('--network must point to a file or URL')
     if args.verbose:
         print(f'Loading network from "{network_pkl}"...')
+
+    dataset_kwargs = None
     with dnnlib.util.open_url(network_pkl, verbose=args.verbose) as f:
         network_dict = legacy.load_network_pkl(f)
         args.G = network_dict['G_ema'] # subclass of torch.nn.Module
+        args.E = network_dict['E_ema'] # subclass of torch.nn.Module
+
+        def print_keys(d):
+            if isinstance(d, dict):
+                print(d.keys())
+            for k in d.keys():
+                if isinstance(d[k], dict):
+                    print_keys(d[k])
+        print_keys(network_dict)
+        # exit()
+        if resolution is None:
+            resolution = network_dict['training_set_kwargs']['resolution']
+            print(f"Updated resolution to {resolution}")
+            dataset_kwargs = network_dict['training_set_kwargs']
 
     # Initialize dataset options.
     if data is not None:
-        args.dataset_kwargs = dnnlib.EasyDict(class_name='training.dataset.ImageFolderDataset', path=data)
+        # args.dataset_kwargs = dnnlib.EasyDict(class_name='training.dataset.ImageFolderDataset', path=data)
+        # args.clear_dataset_kwargs = dnnlib.EasyDict(class_name='training.dataset.ClearSkyDataset', path=data)
+
+        # # Dataset
+        # args.dataset_kwargs, _ = init_dataset_kwargs(
+        #     data=data,
+        #     resolution=resolution,
+        # )
+        # print("args.dataset_kwargs:", args.dataset_kwargs)
+        # if dataset_kwargs is not None:
+        #     print("ckpt dataset_kwargs:", dataset_kwargs)
+        #     assert args.dataset_kwargs['resolution'] == dataset_kwargs['resolution']
+        #     assert args.dataset_kwargs['use_labels'] == dataset_kwargs['use_labels']
+        #     args.dataset_kwargs['normalize_azimuth'] = dataset_kwargs['normalize_azimuth']
+
+        # # ClearSky Dataset
+        # args.clear_dataset_kwargs, _ = init_dataset_kwargs(
+        #     data=data,
+        #     class_name='training.dataset.ClearSkyDataset',
+        #     resolution=args.dataset_kwargs.resolution,
+        #     normalize_azimuth=args.dataset_kwargs.normalize_azimuth
+        # )
+
+        args.dataset_kwargs = dnnlib.EasyDict(
+            class_name='training.dataset.ImageFolderDataset',
+            path=data,
+            use_labels=dataset_kwargs['use_labels'],
+            max_size=None,
+            xflip=False,
+            resolution=dataset_kwargs['resolution'],
+            normalize_azimuth=dataset_kwargs['normalize_azimuth'],
+        )
+        args.clear_dataset_kwargs = dnnlib.EasyDict(
+            class_name='training.dataset.ClearSkyDataset',
+            path=data,
+            use_labels=dataset_kwargs['use_labels'],
+            max_size=None,
+            xflip=False,
+            resolution=dataset_kwargs['resolution'],
+            normalize_azimuth=dataset_kwargs['normalize_azimuth'],
+        )
+
+        print("args.clear_dataset_kwargs:", args.clear_dataset_kwargs)
     elif network_dict['training_set_kwargs'] is not None:
+        raise NotImplementedError
         args.dataset_kwargs = dnnlib.EasyDict(network_dict['training_set_kwargs'])
     else:
         ctx.fail('Could not look up dataset options; please specify --data')
@@ -164,11 +248,15 @@ def calc_metrics(ctx, network_pkl, metrics, data, mirror, gpus, verbose):
         print(json.dumps(args.dataset_kwargs, indent=2))
 
     # Locate run dir.
-    args.run_dir = None
-    if os.path.isfile(network_pkl):
-        pkl_dir = os.path.dirname(network_pkl)
-        if os.path.isfile(os.path.join(pkl_dir, 'training_options.json')):
-            args.run_dir = pkl_dir
+    if args.run_dir == None:
+        if os.path.isfile(network_pkl):
+            pkl_dir = os.path.dirname(network_pkl)
+            if os.path.isfile(os.path.join(pkl_dir, 'training_options.json')):
+                args.run_dir = pkl_dir
+    else:
+        pkl_dir = os.path.basename(os.path.dirname(network_pkl))
+        args.run_dir = os.path.join(args.run_dir, pkl_dir)
+        os.makedirs(args.run_dir, exist_ok=True)
 
     # Launch processes.
     if args.verbose:

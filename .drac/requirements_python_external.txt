@@ -1,0 +1,12 @@
+skylibs
+pysolar
+rclone-python
+ffmpeg-python
+lightning
+lpips
+pytorch_fid
+torch-fidelity
+torchmetrics
+torchmetrics[image]
+opencv-python-headless
+pybind11[global]

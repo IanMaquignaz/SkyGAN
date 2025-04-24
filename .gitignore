@@ -1,5 +1,9 @@
 __pycache__
 .cache/
+.drac_locks/
+output_SkyGAN
+output_SkyGAN_noClearSky
+output_metrics
 src/stylegan3/out
 src/stylegan3/_screenshots
 core
@@ -10,3 +14,8 @@ out
 data_*
 dummy.py
 output
+output_*
+core.*
+ENV_*
+tmp
+logs
